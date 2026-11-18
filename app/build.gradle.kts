@@ -29,6 +29,12 @@ android {
             "ORS_API_KEY",
             "\"${localProps.getProperty("ORS_API_KEY", "")}\""
         )
+
+        buildConfigField(
+            "String",
+            "MAPTILER_KEY",
+            "\"${localProps.getProperty("MAPTILER_KEY", "")}\""
+        )
     }
 
     buildTypes {

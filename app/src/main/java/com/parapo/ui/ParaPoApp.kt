@@ -1,4 +1,4 @@
-package com.parapo.ui
+﻿package com.parapo.ui
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
@@ -16,15 +16,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.parapo.ui.theme.DeepBlue
-import com.parapo.ui.theme.PrimaryBlue
-import com.parapo.ui.theme.SurfaceLight
+import com.parapo.ui.theme.ActionBlue
+import com.parapo.ui.theme.InactiveGray
+import com.parapo.ui.theme.InkNavy
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -74,23 +76,17 @@ fun ParaPoApp() {
                 })
             }
             composable(Routes.HOME) {
-                PlaceholderScreen(
-                    title = "S3 Home", isTab = true,
-                    actions = listOf(
-                        "Set My Stop" to { navController.navigate(Routes.TRIP_SETUP) },
-                        "Bell: test alert" to { navController.navigate(Routes.ALERT) }
-                    )
+                HomeScreen(
+                    onSetStop = { navController.navigate(Routes.TRIP_SETUP) },
+                    onTestAlert = { navController.navigate(Routes.ALERT) }
                 )
             }
             composable(Routes.TRIP_SETUP) {
-                PlaceholderScreen(
-                    title = "S4 Trip Setup", isTab = false,
-                    actions = listOf(
-                        "Start Trip" to {
-                            navController.navigate(Routes.LIVE) { popUpTo(Routes.HOME) }
-                        },
-                        "Back" to { navController.popBackStack() }
-                    )
+                TripSetupScreen(
+                    onBack = { navController.popBackStack() },
+                    onStartTrip = {
+                        navController.navigate(Routes.LIVE) { popUpTo(Routes.HOME) }
+                    }
                 )
             }
             composable(Routes.LIVE) {
@@ -128,7 +124,7 @@ fun ParaPoApp() {
 
 @Composable
 private fun ParaPoBottomBar(navController: NavHostController, currentRoute: String?) {
-    NavigationBar {
+    NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
         tabs.forEach { tab ->
             NavigationBarItem(
                 selected = currentRoute == tab.route,
@@ -142,11 +138,14 @@ private fun ParaPoBottomBar(navController: NavHostController, currentRoute: Stri
                 icon = { Icon(tab.icon, contentDescription = tab.label) },
                 label = { Text(tab.label) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = PrimaryBlue,
-                    selectedTextColor = DeepBlue,
-                    indicatorColor = SurfaceLight
+                    selectedIconColor = ActionBlue,
+                    selectedTextColor = ActionBlue,
+                    unselectedIconColor = InactiveGray,
+                    unselectedTextColor = InkNavy,
+                    indicatorColor = Color.Transparent
                 )
             )
         }
     }
 }
+

@@ -24,3 +24,8 @@ captures/
 
 # Kotlin build cache
 .kotlin/
+
+*.bak
+*.before-diag
+s4-diag/
+install-s4.ps1
