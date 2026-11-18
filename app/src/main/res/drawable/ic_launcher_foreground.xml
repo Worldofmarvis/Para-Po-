@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder icon: a gold location pin. Replace with the exported Sulo artwork. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFB020"
+        android:pathData="M54,24c-11,0 -20,9 -20,20c0,15 20,38 20,38s20,-23 20,-38c0,-11 -9,-20 -20,-20z" />
+    <path
+        android:fillColor="#0B5FB5"
+        android:pathData="M54,38m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+</vector>
