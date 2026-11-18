@@ -21,3 +21,6 @@ Thumbs.db
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Kotlin build cache
+.kotlin/
