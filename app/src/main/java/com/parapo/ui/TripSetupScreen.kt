@@ -107,7 +107,9 @@ data class TripSetupResult(
     val destLon: Double,
     val vehicle: String,          // "JEEPNEY" | "BUS" | "TRAIN"
     val alertDistanceM: Int,
-    val routeKm: Double           // road km from ORS, or straight-line x 1.25 if no route
+    val routeKm: Double,          // road km from ORS, or straight-line x 1.25 if no route
+    val originLat: Double = 13.7847,   // where the trip starts (S5 reloads the cached route with this)
+    val originLon: Double = 121.0735
 )
 
 // Placeholder origin (BatStateU Alangilan). Replace with LocationSource's last fix in Week 2.
@@ -115,7 +117,7 @@ private val DEFAULT_ORIGIN = GeoPoint(13.7847, 121.0735)
 private const val ROAD_FACTOR = 1.25
 private val SHEET_CORNER = 24.dp
 
-private val MAPTILER = object : OnlineTileSourceBase(
+internal val MAPTILER = object : OnlineTileSourceBase(
     "MapTilerStreets", 0, 19, 256, ".png",
     arrayOf("https://api.maptiler.com/maps/streets-v2/256/"),
     "\u00A9 MapTiler \u00A9 OpenStreetMap contributors"
@@ -163,7 +165,7 @@ private fun partialPoints(points: List<GeoPoint>, cum: DoubleArray, frac: Float)
     return points.subList(0, i) + tip
 }
 
-private fun pinDrawable(ctx: Context, color: Int): Drawable {
+internal fun pinDrawable(ctx: Context, color: Int): Drawable {
     val d = ctx.resources.displayMetrics.density
     val w = (34 * d).toInt()
     val h = (46 * d).toInt()
@@ -187,7 +189,7 @@ private fun pinDrawable(ctx: Context, color: Int): Drawable {
     return BitmapDrawable(ctx.resources, bmp)
 }
 
-private fun userDotDrawable(ctx: Context, color: Int): Drawable {
+internal fun userDotDrawable(ctx: Context, color: Int): Drawable {
     val d = ctx.resources.displayMetrics.density
     val s = (44 * d).toInt()
     val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
@@ -483,7 +485,8 @@ fun TripSetupScreen(
                     onClick = {
                         val d = dest ?: return@Button
                         val result = TripSetupResult(
-                            d.latitude, d.longitude, vehicle, (alertKm * 1000).toInt(), displayKm ?: 0.0
+                            d.latitude, d.longitude, vehicle, (alertKm * 1000).toInt(), displayKm ?: 0.0,
+                            DEFAULT_ORIGIN.latitude, DEFAULT_ORIGIN.longitude
                         )
                         scope.launch {
                             starting = true
