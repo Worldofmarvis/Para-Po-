@@ -39,8 +39,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -471,14 +469,11 @@ fun TripSetupScreen(
                     )
                     Text("${"%.1f".format(alertKm)} km", fontSize = 16.sp, color = DeepBlue, fontWeight = FontWeight.Bold)
                 }
-                Slider(
+                AlertDistanceSlider(
                     value = alertKm,
                     onValueChange = { alertKm = it },
                     valueRange = 1f..5f,
-                    steps = 7,
-                    colors = SliderDefaults.colors(
-                        thumbColor = PrimaryBlue, activeTrackColor = PrimaryBlue, inactiveTrackColor = SurfaceLight
-                    )
+                    step = 0.5f
                 )
 
                 Button(
