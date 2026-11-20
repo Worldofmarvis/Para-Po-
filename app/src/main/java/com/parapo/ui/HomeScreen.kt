@@ -39,6 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import com.parapo.storage.TripLog
+import com.parapo.trip.TripPhase
 import com.parapo.ui.theme.ActionBlue
 import com.parapo.ui.theme.AlertOrange
 import com.parapo.ui.theme.AvatarBg
@@ -48,17 +51,20 @@ import com.parapo.ui.theme.InkNavy
 import com.parapo.ui.theme.MetaNavy
 import com.parapo.ui.theme.ScreenBg
 import com.parapo.ui.theme.SuccessGreen
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * S3 Home, laid out like the mockup (Figure 2) with the 6.6 corrections:
- * no ETB fares, no Ethiopian places, "Set My Stop", "Get an alert before your stop".
- * Fake data for now.
- * TODO: "Trip in progress" card (opens S5) when TripController is ARMED/TRACKING.
- * TODO: username from AuthGate/Storage; trips from Storage.
+ * S3 Home, laid out like the mockup (Figure 2) with the 6.6 corrections.
+ * Reads username from AuthGate and recent trips from TripLogStore.
  */
 @Composable
 fun HomeScreen(
     userName: String = "Juan",
+    recentTrips: List<TripLog> = emptyList(),
+    activeTripPhase: TripPhase = TripPhase.IDLE,
+    onOpenLiveTrip: () -> Unit = {},
     onSetStop: () -> Unit,
     onTestAlert: () -> Unit
 ) {
@@ -158,6 +164,27 @@ fun HomeScreen(
             )
 
             Spacer(Modifier.height(14.dp))
+            if (activeTripPhase == TripPhase.ARMED || activeTripPhase == TripPhase.TRACKING) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = SuccessGreen.copy(alpha = 0.14f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .clickable(onClick = onOpenLiveTrip)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Trip in progress", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = InkNavy)
+                            Text("Tap to open Live Tracker", fontSize = 13.sp, color = MetaNavy)
+                        }
+                        Text("Open →", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                    }
+                }
+            }
             Button(
                 onClick = onSetStop,
                 modifier = Modifier
@@ -177,7 +204,29 @@ fun HomeScreen(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
-            fakeRecentTrips.forEach { trip -> TripRow(trip) }
+            if (recentTrips.isEmpty()) {
+                Text(
+                    text = "No saved trips yet. Set your stop above to start your first ride.",
+                    color = MetaNavy,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                recentTrips.take(4).forEach { log ->
+                    val distKm = String.format(Locale.US, "%.1f", log.totalDistanceM / 1000.0).toDouble()
+                    val dateText = SimpleDateFormat("MMM d", Locale.US).format(Date(log.startedAt))
+                    val parts = log.routeLabel.split("→").map { it.trim() }
+                    TripRow(
+                        RecentTrip(
+                            from = parts.getOrNull(0)?.ifBlank { "Origin" } ?: "Origin",
+                            to = parts.getOrNull(1)?.ifBlank { log.routeId } ?: log.routeLabel.ifBlank { log.routeId },
+                            distanceKm = distKm,
+                            dateText = dateText,
+                            result = if (log.result == "ON_TIME") AlertResult.ON_TIME else AlertResult.LATE
+                        )
+                    )
+                }
+            }
             Spacer(Modifier.height(16.dp))
         }
     }

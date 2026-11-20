@@ -27,11 +27,19 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.parapo.auth.AuthGate
+import com.parapo.storage.SettingsStore
+import com.parapo.storage.TripLog
+import com.parapo.storage.TripLogStore
 import com.parapo.trip.TripController
 import com.parapo.trip.TripPhase
 import com.parapo.ui.theme.ActionBlue
 import com.parapo.ui.theme.InactiveGray
 import com.parapo.ui.theme.InkNavy
+import com.parapo.util.PermissionHelper
+import com.parapo.util.VehicleMode
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -50,6 +58,13 @@ fun ParaPoApp() {
     val showBottomBar = currentRoute in Routes.bottomBarRoutes
     val appContext = LocalContext.current.applicationContext
     val trip by TripController.state.collectAsState()
+    val savedTrips by TripLogStore.trips.collectAsState()
+
+    // Load persisted settings and trip history once at app launch.
+    LaunchedEffect(Unit) {
+        SettingsStore.load(appContext)
+        TripLogStore.load(appContext)
+    }
 
     // When the controller decides it is time to alert, open S6 (once).
     LaunchedEffect(trip.phase) {
@@ -93,20 +108,34 @@ fun ParaPoApp() {
         ) {
             composable(Routes.SPLASH) {
                 SplashScreen(onFinished = {
-                    navController.navigate(Routes.LOGIN) {
+                    val destination = when (trip.phase) {
+                        TripPhase.TRACKING, TripPhase.ARMED -> Routes.LIVE
+                        TripPhase.ALERTING -> Routes.ALERT
+                        else -> Routes.LOGIN
+                    }
+                    navController.navigate(destination) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
                 })
             }
             composable(Routes.LOGIN) {
                 LoginScreen(onSuccess = {
-                    navController.navigate(Routes.HOME) {
+                    val nextRoute = if (PermissionHelper.hasAllRequiredPermissions(appContext)) {
+                        Routes.HOME
+                    } else {
+                        Routes.PERMISSIONS
+                    }
+                    navController.navigate(nextRoute) {
                         popUpTo(Routes.LOGIN) { inclusive = true }
                     }
                 })
             }
             composable(Routes.HOME) {
                 HomeScreen(
+                    userName = AuthGate.getUsername(appContext),
+                    recentTrips = savedTrips,
+                    activeTripPhase = trip.phase,
+                    onOpenLiveTrip = { navController.navigate(Routes.LIVE) },
                     onSetStop = { navController.navigate(Routes.TRIP_SETUP) },
                     onTestAlert = { navController.navigate(Routes.ALERT) }
                 )
@@ -115,8 +144,12 @@ fun ParaPoApp() {
                 TripSetupScreen(
                     onBack = { navController.popBackStack() },
                     onStartTrip = { setup ->
-                        TripController.start(setup, appContext)
-                        navController.navigate(Routes.LIVE) { popUpTo(Routes.HOME) }
+                        if (!PermissionHelper.hasAllRequiredPermissions(appContext)) {
+                            navController.navigate(Routes.PERMISSIONS)
+                        } else {
+                            TripController.start(setup, appContext)
+                            navController.navigate(Routes.LIVE) { popUpTo(Routes.HOME) }
+                        }
                     }
                 )
             }
@@ -139,17 +172,48 @@ fun ParaPoApp() {
             }
             composable(Routes.SUMMARY) {
                 SummaryScreen(onSave = {
+                    val setup = trip.setup
+                    val summary = TripSummaryStore.last
+                    val triggerM = trip.triggerM.roundToInt().takeIf { it > 0 }
+                        ?: setup?.alertDistanceM
+                        ?: SettingsStore.current(appContext).alertDistanceM
+                    val firedM = summary.firedAtRemainingM?.roundToInt() ?: triggerM
+                    val isOnTime = abs(firedM - triggerM) <= 300
+                    val mode = runCatching { VehicleMode.valueOf(setup?.vehicle ?: "BUS") }
+                        .getOrDefault(VehicleMode.BUS)
+                    val destLabel = if (setup != null) {
+                        String.format(java.util.Locale.US, "%.4f, %.4f", setup.destLat, setup.destLon)
+                    } else {
+                        "Selected Stop"
+                    }
+                    TripLogStore.append(
+                        appContext,
+                        TripLog(
+                            id = "t_${System.currentTimeMillis()}",
+                            routeId = "r_${setup?.destLat?.hashCode() ?: 0}",
+                            startedAt = TripSummaryStore.startedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis(),
+                            endedAt = System.currentTimeMillis(),
+                            mode = mode,
+                            triggerM = triggerM,
+                            alertFiredAtRemainingM = firedM,
+                            source = trip.source.name,
+                            gpsLostS = TripSummaryStore.gpsLostS.toInt(),
+                            newFingerprints = 0,
+                            result = if (isOnTime) "ON_TIME" else "LATE",
+                            routeLabel = "Current Location → $destLabel",
+                            totalDistanceM = (summary.totalRideM ?: trip.totalM).roundToInt()
+                        )
+                    )
                     TripController.reset()
                     backToHome()
                 })
             }
-            composable(Routes.TRIPS) { PlaceholderScreen(title = "S8 My Trips", isTab = true) }
-            composable(Routes.SETTINGS) { PlaceholderScreen(title = "S9 Settings", isTab = true) }
+            composable(Routes.TRIPS) { TripsScreen() }
+            composable(Routes.SETTINGS) {
+                SettingsScreen(onOpenPermissions = { navController.navigate(Routes.PERMISSIONS) })
+            }
             composable(Routes.PERMISSIONS) {
-                PlaceholderScreen(
-                    title = "S10 Permissions", isTab = false,
-                    actions = listOf("Continue" to backToHome)
-                )
+                PermissionsScreen(onContinue = backToHome)
             }
         }
     }
