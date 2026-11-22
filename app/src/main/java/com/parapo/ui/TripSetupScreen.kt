@@ -69,14 +69,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.parapo.BuildConfig
+import com.parapo.location.FusedLocationSource
 import com.parapo.route.PlaceResult
 import com.parapo.route.RouteRepository
 import com.parapo.route.RouteResult
+import com.parapo.storage.SettingsStore
+import com.parapo.util.PermissionHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.ITileSource
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
@@ -128,6 +133,12 @@ internal val MAPTILER = object : OnlineTileSourceBase(
             MapTileIndex.getX(pMapTileIndex) + "/" +
             MapTileIndex.getY(pMapTileIndex) + ".png" +
             "?key=" + BuildConfig.MAPTILER_KEY
+}
+
+internal fun activeTileSource(): ITileSource {
+    val k = BuildConfig.MAPTILER_KEY.trim()
+    val hasRealKey = k.isNotBlank() && k != "dummy_key" && !k.startsWith("your_")
+    return if (hasRealKey) MAPTILER else TileSourceFactory.MAPNIK
 }
 
 private fun haversineM(a: GeoPoint, b: GeoPoint): Double {
@@ -226,12 +237,27 @@ fun TripSetupScreen(
 
     val repo = remember { RouteRepository(ctx.applicationContext) }
     val anim = remember { Animatable(0f) }
+    val savedSettings = remember { SettingsStore.current(ctx.applicationContext) }
 
+    var origin by remember { mutableStateOf(DEFAULT_ORIGIN) }
     var dest by remember { mutableStateOf<GeoPoint?>(null) }
     var vehicle by remember { mutableStateOf("JEEPNEY") }
-    var alertKm by remember { mutableFloatStateOf(3.0f) }
+    var alertKm by remember {
+        mutableFloatStateOf((savedSettings.alertDistanceM / 1000f).coerceIn(1f, 5f))
+    }
     var sheetHeight by remember { mutableStateOf(0.dp) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+
+    // Fetch real last-known GPS fix if location permission is granted (Phase 1 + Phase 3)
+    LaunchedEffect(Unit) {
+        if (PermissionHelper.hasFineLocation(ctx)) {
+            val live = FusedLocationSource(ctx.applicationContext).lastKnownPoint()
+            if (live != null) {
+                origin = live
+                if (dest == null) mapRef?.controller?.animateTo(live)
+            }
+        }
+    }
 
     // search
     var query by remember { mutableStateOf("") }
@@ -258,7 +284,7 @@ fun TripSetupScreen(
         searching = true
         searchMsg = null
         try {
-            repo.search(q, DEFAULT_ORIGIN.latitude, DEFAULT_ORIGIN.longitude)
+            repo.search(q, origin.latitude, origin.longitude)
                 .onSuccess { results = it; if (it.isEmpty()) searchMsg = "No places found" }
                 .onFailure { results = emptyList(); searchMsg = "Search failed. Check your connection." }
         } finally {
@@ -266,8 +292,8 @@ fun TripSetupScreen(
         }
     }
 
-    // Fetch the road route whenever the stop changes, then draw it
-    LaunchedEffect(dest) {
+    // Fetch the road route whenever the stop or origin changes, then draw it
+    LaunchedEffect(dest, origin) {
         val d = dest
         route = null
         routeFailed = false
@@ -275,7 +301,7 @@ fun TripSetupScreen(
         anim.snapTo(0f)
         if (d == null) return@LaunchedEffect
         routeLoading = true
-        repo.fetchRoute(DEFAULT_ORIGIN, d)
+        repo.fetchRoute(origin, d)
             .onSuccess { route = it }
             .onFailure { routeFailed = true; routeError = it.message ?: it.javaClass.simpleName }
         routeLoading = false
@@ -285,7 +311,7 @@ fun TripSetupScreen(
     val mapRoute = route
     val cum = remember(mapRoute) { mapRoute?.let { cumulative(it.points) } }
     val displayKm: Double? = mapRoute?.let { it.distanceM / 1000.0 }
-        ?: dest?.let { haversineM(DEFAULT_ORIGIN, it) * ROAD_FACTOR / 1000.0 }
+        ?: dest?.let { haversineM(origin, it) * savedSettings.roadFactor / 1000.0 }
 
     val onTap by rememberUpdatedState<(GeoPoint) -> Unit> {
         focus.clearFocus()
@@ -306,7 +332,7 @@ fun TripSetupScreen(
             modifier = Modifier.fillMaxSize().padding(bottom = mapBottomPad),
             factory = { c ->
                 MapView(c).apply {
-                    setTileSource(MAPTILER)
+                    setTileSource(activeTileSource())
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     minZoomLevel = 4.0
@@ -327,7 +353,7 @@ fun TripSetupScreen(
 
                 val line: List<GeoPoint> = when {
                     mapRoute != null && cum != null -> partialPoints(mapRoute.points, cum, frac)
-                    straightFallback -> listOf(DEFAULT_ORIGIN, mapDest!!)
+                    straightFallback && mapDest != null -> listOf(origin, mapDest)
                     else -> emptyList()
                 }
                 if (line.size >= 2) {
@@ -355,7 +381,7 @@ fun TripSetupScreen(
                     })
                 }
                 map.overlays.add(Marker(map).apply {
-                    position = DEFAULT_ORIGIN
+                    position = origin
                     icon = userDot
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     infoWindow = null
@@ -370,7 +396,7 @@ fun TripSetupScreen(
                 if (map.tag != fitKey) {
                     map.tag = fitKey
                     if (mapDest != null) {
-                        val pts = mapRoute?.points ?: listOf(DEFAULT_ORIGIN, mapDest)
+                        val pts = mapRoute?.points ?: listOf(origin, mapDest)
                         map.post {
                             val box = BoundingBox.fromGeoPoints(pts)
                             map.zoomToBoundingBox(box, true, (110 * map.resources.displayMetrics.density).toInt())
@@ -486,7 +512,7 @@ fun TripSetupScreen(
                         val d = dest ?: return@Button
                         val result = TripSetupResult(
                             d.latitude, d.longitude, vehicle, (alertKm * 1000).toInt(), displayKm ?: 0.0,
-                            DEFAULT_ORIGIN.latitude, DEFAULT_ORIGIN.longitude
+                            origin.latitude, origin.longitude
                         )
                         scope.launch {
                             starting = true

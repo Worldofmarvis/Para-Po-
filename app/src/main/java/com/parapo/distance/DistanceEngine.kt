@@ -1,7 +1,10 @@
 package com.parapo.distance
 
+import com.parapo.util.Constants
+import com.parapo.util.VehicleMode
 import org.osmdroid.util.GeoPoint
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -9,7 +12,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * FR-07 / FR-08: snaps a position to the route polyline and gives remaining distance.
+ * FR-07 / FR-08 / FR-09: snaps a position to the route polyline, computes remaining distance,
+ * smooths speed via EMA, and calculates the speed-adaptive trigger distance.
  * [scale] is 1.0 for a real road route, or ROAD_FACTOR (1.25) when only a straight line exists.
  */
 class DistanceEngine(val points: List<GeoPoint>, private val scale: Double = 1.0) {
@@ -23,7 +27,7 @@ class DistanceEngine(val points: List<GeoPoint>, private val scale: Double = 1.0
         lengthM = if (points.size > 1) cumulativeM.last() else 0.0
     }
 
-    /** Meters from the route start, never going backward by more than 50 m. */
+    /** Meters from the route start, monotonic (never going backward by more than 50 m). */
     fun snap(p: GeoPoint): Double {
         if (points.size < 2) return 0.0
         val from = segmentAt(max(0.0, lastProgress - 200.0))
@@ -55,7 +59,7 @@ class DistanceEngine(val points: List<GeoPoint>, private val scale: Double = 1.0
 
     fun remainingM(progress: Double): Double = (lengthM - progress).coerceAtLeast(0.0) * scale
 
-    /** The point [progressM] meters along the route (used by the demo drive). */
+    /** The point [progressM] meters along the route (used by GPX/route replay). */
     fun pointAt(progressM: Double): GeoPoint {
         if (points.size < 2) return points.firstOrNull() ?: GeoPoint(0.0, 0.0)
         val m = progressM.coerceIn(0.0, lengthM)
@@ -86,5 +90,62 @@ class DistanceEngine(val points: List<GeoPoint>, private val scale: Double = 1.0
                 sin(dLon / 2) * sin(dLon / 2)
             return 2 * r * atan2(sqrt(h), sqrt(1 - h))
         }
+
+        /** FR-08: Straight-line fallback distance scaled by roadFactor (default 1.25). */
+        fun straightLineFallbackM(
+            position: GeoPoint,
+            dest: GeoPoint,
+            roadFactor: Double = Constants.ROAD_FACTOR
+        ): Double = haversineM(position, dest) * roadFactor
+
+        /** Exponential Moving Average (EMA) speed filter (alpha = 0.3 per Build Guide 7.5). */
+        fun smoothSpeedEma(
+            prevSpeedMps: Double?,
+            currentSpeedMps: Double,
+            alpha: Double = Constants.SPEED_EMA_ALPHA
+        ): Double {
+            val clamped = currentSpeedMps.coerceAtLeast(0.0)
+            return if (prevSpeedMps == null || prevSpeedMps < 0.0) {
+                clamped
+            } else {
+                alpha * clamped + (1.0 - alpha) * prevSpeedMps
+            }
+        }
+
+        /**
+         * FR-09: Speed-adaptive trigger distance (Build Guide 7.5):
+         * clamp(v * leadTime, MIN_TRIGGER_M = 1000, alertDistanceM) + safetyMarginM if estimated.
+         */
+        fun computeTriggerDistanceM(
+            smoothedSpeedMps: Double,
+            mode: VehicleMode,
+            alertDistanceM: Int = Constants.DEFAULT_ALERT_DISTANCE_M,
+            isEstimatedSource: Boolean = false,
+            safetyMarginM: Int = Constants.DEFAULT_SAFETY_MARGIN_M
+        ): Double {
+            val leadS = Constants.leadTimeSeconds(mode)
+            val maxTrigger = max(Constants.MIN_TRIGGER_M, alertDistanceM).toDouble()
+            val base = (smoothedSpeedMps * leadS).coerceIn(
+                Constants.MIN_TRIGGER_M.toDouble(),
+                maxTrigger
+            )
+            return if (isEstimatedSource) base + safetyMarginM else base
+        }
+
+        /** Local ETA in minutes; hidden (null) when speed < 1 m/s (Build Guide 6.3). */
+        fun computeEtaMinutes(remainingM: Double, smoothedSpeedMps: Double): Int? =
+            if (smoothedSpeedMps >= Constants.MOVING_TOWARD_MIN_SPEED_MPS) {
+                max(1, ceil(remainingM / smoothedSpeedMps / 60.0).toInt())
+            } else {
+                null
+            }
+
+        /**
+         * Alert decision movingToward check (Build Guide 7.5, TC-09):
+         * true if progress increased by >= 30 m over the last 20 s OR speed > 1 m/s while not retreating.
+         */
+        fun isMovingToward(progressDeltaM: Double, speedMps: Double): Boolean =
+            progressDeltaM >= Constants.MOVING_TOWARD_MIN_PROGRESS_M ||
+                (speedMps > Constants.MOVING_TOWARD_MIN_SPEED_MPS && progressDeltaM >= 0.0)
     }
 }

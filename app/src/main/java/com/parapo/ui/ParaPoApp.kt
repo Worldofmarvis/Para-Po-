@@ -162,6 +162,7 @@ fun ParaPoApp() {
             composable(Routes.ALERT) {
                 AlertScreen(
                     onAwake = {
+                        TripSummaryStore.gpsLostS = trip.gpsLostS
                         TripSummaryStore.finish(trip.remainingM)
                         TripController.dismissAlert()
                         navController.navigate(Routes.SUMMARY) {
@@ -186,19 +187,24 @@ fun ParaPoApp() {
                     } else {
                         "Selected Stop"
                     }
+                    val sourceLabel = when {
+                        trip.usedCellFallback -> "GPS+CELL"
+                        trip.source == com.parapo.trip.PositionSourceKind.DEAD_RECKONING -> "DEAD_RECKONING"
+                        else -> "GPS"
+                    }
                     TripLogStore.append(
                         appContext,
                         TripLog(
                             id = "t_${System.currentTimeMillis()}",
-                            routeId = "r_${setup?.destLat?.hashCode() ?: 0}",
+                            routeId = trip.routeId.ifBlank { "r_${setup?.destLat?.hashCode() ?: 0}" },
                             startedAt = TripSummaryStore.startedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis(),
                             endedAt = System.currentTimeMillis(),
                             mode = mode,
                             triggerM = triggerM,
                             alertFiredAtRemainingM = firedM,
-                            source = trip.source.name,
-                            gpsLostS = TripSummaryStore.gpsLostS.toInt(),
-                            newFingerprints = 0,
+                            source = sourceLabel,
+                            gpsLostS = trip.gpsLostS.toInt(),
+                            newFingerprints = trip.newFingerprints,
                             result = if (isOnTime) "ON_TIME" else "LATE",
                             routeLabel = "Current Location → $destLabel",
                             totalDistanceM = (summary.totalRideM ?: trip.totalM).roundToInt()

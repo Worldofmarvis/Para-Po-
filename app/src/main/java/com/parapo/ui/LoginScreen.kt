@@ -28,6 +28,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,10 +78,24 @@ fun LoginScreen(onSuccess: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var failedAttempts by remember { mutableIntStateOf(0) }
+    var lockoutSeconds by remember { mutableIntStateOf(0) }
     var showForgot by remember { mutableStateOf(false) }
 
+    // Cooldown timer after 5 consecutive wrong PIN attempts (brute-force protection)
+    LaunchedEffect(lockoutSeconds) {
+        if (lockoutSeconds > 0) {
+            delay(1000)
+            lockoutSeconds -= 1
+            if (lockoutSeconds == 0) {
+                failedAttempts = 0
+                errorMsg = null
+            }
+        }
+    }
+
     LaunchedEffect(pin, stage) {
-        if (pin.length == PIN_LENGTH && !busy) {
+        if (pin.length == PIN_LENGTH && !busy && lockoutSeconds == 0) {
             busy = true
             errorMsg = null
             when (stage) {
@@ -111,9 +126,17 @@ fun LoginScreen(onSuccess: () -> Unit) {
                         AuthGate.verifyPin(context, pin)
                     }
                     if (ok) {
+                        failedAttempts = 0
                         onSuccess()
                     } else {
-                        errorMsg = "Incorrect PIN. Try again."
+                        failedAttempts += 1
+                        if (failedAttempts >= 5) {
+                            lockoutSeconds = 30
+                            errorMsg = "Too many attempts. Try again in 30 s."
+                        } else {
+                            val left = 5 - failedAttempts
+                            errorMsg = "Incorrect PIN ($left attempts left)."
+                        }
                         delay(300)
                         pin = ""
                         busy = false
@@ -172,7 +195,14 @@ fun LoginScreen(onSuccess: () -> Unit) {
             modifier = Modifier.height(26.dp).padding(top = 4.dp),
             contentAlignment = Alignment.Center
         ) {
-            if (errorMsg != null) {
+            if (lockoutSeconds > 0) {
+                Text(
+                    text = "Too many attempts. Try again in $lockoutSeconds s.",
+                    color = PinGold,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else if (errorMsg != null) {
                 Text(
                     text = errorMsg!!,
                     color = PinGold,
@@ -191,7 +221,7 @@ fun LoginScreen(onSuccess: () -> Unit) {
         Spacer(Modifier.weight(1f))
 
         PinPad(
-            enabled = !busy,
+            enabled = !busy && lockoutSeconds == 0,
             onDigit = {
                 errorMsg = null
                 if (pin.length < PIN_LENGTH) pin += it

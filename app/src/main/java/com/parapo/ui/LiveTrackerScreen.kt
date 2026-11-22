@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.parapo.R
+import com.parapo.location.SamplingTier
 import com.parapo.trip.PositionSourceKind
 import com.parapo.trip.TripController
 import com.parapo.trip.TripPhase
@@ -145,7 +146,7 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(bottom = mapBottomPad),
             factory = { c ->
                 MapView(c).apply {
-                    setTileSource(MAPTILER)
+                    setTileSource(activeTileSource())
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     minZoomLevel = 4.0
@@ -221,7 +222,12 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
                 PositionSourceKind.DEAD_RECKONING -> "Dead reckoning" to AlertOrange
             }
             Chip(text = srcText, color = srcColor)
-            Chip(text = "Demo drive", color = MutedText)
+            val samplingLabel = when (ui.samplingTier) {
+                SamplingTier.NEAR -> "High acc"
+                SamplingTier.FAR_SCREEN_ON -> "Eco 5s"
+                SamplingTier.FAR_SCREEN_OFF -> "Eco 10s"
+            }
+            Chip(text = samplingLabel, color = MutedText)
         }
 
         // ---- My location button ----

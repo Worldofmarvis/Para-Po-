@@ -115,14 +115,14 @@ flowchart TD
 
 ## Phase 3: Location Tracking & Distance Calculation (FR-06, FR-07, FR-08, FR-09)
 
-- [ ] **3.1 Build `location/LocationSource.kt`**:
+- [x] **3.1 Build `location/LocationSource.kt`**:
   - Encapsulate `FusedLocationProviderClient`.
   - Add **GPX Replay / Mock Engine**: Allows feeding synthetic location points from GPX files directly into the stream for automated testing without field driving.
-- [ ] **3.2 Implement `location/AdaptiveSampler.kt`**:
+- [x] **3.2 Implement `location/AdaptiveSampler.kt`**:
   - Adjust sampling rate to preserve battery (FR-06):
     - **Far** ($\text{remaining} > 2 \times \text{trigger}$): interval 5–10 s, balanced power.
     - **Near** ($\text{remaining} \le 2 \times \text{trigger}$): interval 1–2 s, high accuracy.
-- [ ] **3.3 Upgrade `distance/DistanceEngine.kt`**:
+- [x] **3.3 Upgrade `distance/DistanceEngine.kt`**:
   - Ensure monotonic route progression:
     $$\text{progress} = \max(\text{bestProgress}, \text{lastProgress} - 50\text{ m})$$
   - Calculate remaining route distance from cached polyline:
@@ -138,14 +138,14 @@ flowchart TD
 
 ## Phase 4: Cellular & Sensor Fallback Engine (FR-10, FR-11, FR-12)
 
-- [ ] **4.1 Implement `cell/CellTracker.kt`**:
+- [x] **4.1 Implement `cell/CellTracker.kt`**:
   - Read serving cell using `TelephonyManager.requestCellInfoUpdate()` (API 29+).
   - Extract unique `cellKey`: `"MCC-MNC-AreaCode-CellID-Tech"` (e.g. `515-02-4021-18274931-LTE`).
   - Extract signal strength (RSSI / RSRP).
-- [ ] **4.2 Implement `cell/FingerprintStore.kt` (R2 Learning)**:
+- [x] **4.2 Implement `cell/FingerprintStore.kt` (R2 Learning)**:
   - While GPS fix is accurate ($\le 30\text{ m}$), record fingerprint at serving cell change or every 200 m progress.
   - Store mean, min, max progress, RSSI, and observation count to `fingerprints/<routeId>.json`.
-- [ ] **4.3 Implement `fallback/FallbackEngine.kt`**:
+- [x] **4.3 Implement `fallback/FallbackEngine.kt`**:
   - **GPS Loss Detection**: Triggered if no GPS fix with accuracy $\le 50\text{ m}$ within 10 seconds.
   - **Dead Reckoning along Route**:
     $$\text{dr} = \text{lastProgress} + v_{\text{last}} \times \Delta t$$
