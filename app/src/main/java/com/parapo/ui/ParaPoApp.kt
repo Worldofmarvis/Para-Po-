@@ -72,13 +72,21 @@ fun ParaPoApp() {
         if (trip.phase == TripPhase.IDLE) {
             TripSummaryStore.clear()
         } else if (TripSummaryStore.startedAtMs == 0L) {
-            TripSummaryStore.startedAtMs = System.currentTimeMillis()
+            TripSummaryStore.startedAtMs = trip.startedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+            val bm = appContext.getSystemService(android.os.BatteryManager::class.java)
+            val pct = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            if (pct in 0..100) TripSummaryStore.batteryStartPct = pct
         }
         if (trip.phase == TripPhase.ALERTING && TripSummaryStore.firedRemainingM == null) {
-            TripSummaryStore.firedRemainingM = trip.remainingM
+            TripSummaryStore.firedRemainingM = trip.firedAtRemainingM ?: trip.remainingM
         }
         if (trip.phase == TripPhase.ALERTING && navController.currentDestination?.route != Routes.ALERT) {
             navController.navigate(Routes.ALERT)
+        }
+        if (trip.phase == TripPhase.COMPLETED && navController.currentDestination?.route != Routes.SUMMARY) {
+            navController.navigate(Routes.SUMMARY) {
+                popUpTo(Routes.HOME)
+            }
         }
     }
 
@@ -137,7 +145,14 @@ fun ParaPoApp() {
                     activeTripPhase = trip.phase,
                     onOpenLiveTrip = { navController.navigate(Routes.LIVE) },
                     onSetStop = { navController.navigate(Routes.TRIP_SETUP) },
-                    onTestAlert = { navController.navigate(Routes.ALERT) }
+                    onTestAlert = { navController.navigate(Routes.ALERT) },
+                    onOpenTrips = {
+                        navController.navigate(Routes.TRIPS) {
+                            popUpTo(Routes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 )
             }
             composable(Routes.TRIP_SETUP) {
@@ -162,11 +177,22 @@ fun ParaPoApp() {
             composable(Routes.ALERT) {
                 AlertScreen(
                     onAwake = {
-                        TripSummaryStore.gpsLostS = trip.gpsLostS
-                        TripSummaryStore.finish(trip.remainingM)
-                        TripController.dismissAlert()
-                        navController.navigate(Routes.SUMMARY) {
-                            popUpTo(Routes.ALERT) { inclusive = true }
+                        if (trip.phase == TripPhase.ALERTING) {
+                            TripSummaryStore.gpsLostS = trip.gpsLostS
+                            TripSummaryStore.newFingerprints = trip.newFingerprints
+                            TripSummaryStore.finish(
+                                remainingNowM = trip.remainingM,
+                                fallbackStartedAtMs = trip.startedAtMs,
+                                fallbackFiredRemainingM = trip.firedAtRemainingM ?: trip.remainingM
+                            )
+                            TripController.dismissAlert()
+                            navController.navigate(Routes.SUMMARY) {
+                                popUpTo(Routes.ALERT) { inclusive = true }
+                            }
+                        } else {
+                            // Dismissing the S3 "Test alert" preview — stop alarm without touching any trip
+                            com.parapo.alert.AlertManager.stop(appContext)
+                            navController.popBackStack()
                         }
                     }
                 )
@@ -182,22 +208,28 @@ fun ParaPoApp() {
                     val isOnTime = abs(firedM - triggerM) <= 300
                     val mode = runCatching { VehicleMode.valueOf(setup?.vehicle ?: "BUS") }
                         .getOrDefault(VehicleMode.BUS)
-                    val destLabel = if (setup != null) {
-                        String.format(java.util.Locale.US, "%.4f, %.4f", setup.destLat, setup.destLon)
-                    } else {
-                        "Selected Stop"
-                    }
+                    val destLabel = setup?.destName?.takeIf { it.isNotBlank() }
+                        ?: if (setup != null) {
+                            String.format(java.util.Locale.US, "%.4f, %.4f", setup.destLat, setup.destLon)
+                        } else {
+                            "Selected Stop"
+                        }
                     val sourceLabel = when {
                         trip.usedCellFallback -> "GPS+CELL"
                         trip.source == com.parapo.trip.PositionSourceKind.DEAD_RECKONING -> "DEAD_RECKONING"
                         else -> "GPS"
                     }
+                    val bm = appContext.getSystemService(android.os.BatteryManager::class.java)
+                    val endPct = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                        ?.takeIf { it in 0..100 } ?: -1
                     TripLogStore.append(
                         appContext,
                         TripLog(
                             id = "t_${System.currentTimeMillis()}",
                             routeId = trip.routeId.ifBlank { "r_${setup?.destLat?.hashCode() ?: 0}" },
-                            startedAt = TripSummaryStore.startedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis(),
+                            startedAt = TripSummaryStore.startedAtMs.takeIf { it > 0L }
+                                ?: trip.startedAtMs.takeIf { it > 0L }
+                                ?: System.currentTimeMillis(),
                             endedAt = System.currentTimeMillis(),
                             mode = mode,
                             triggerM = triggerM,
@@ -207,7 +239,9 @@ fun ParaPoApp() {
                             newFingerprints = trip.newFingerprints,
                             result = if (isOnTime) "ON_TIME" else "LATE",
                             routeLabel = "Current Location → $destLabel",
-                            totalDistanceM = (summary.totalRideM ?: trip.totalM).roundToInt()
+                            totalDistanceM = (summary.totalRideM?.takeIf { it > 0.0 } ?: trip.totalM).roundToInt(),
+                            batteryStartPct = TripSummaryStore.batteryStartPct,
+                            batteryEndPct = endPct
                         )
                     )
                     TripController.reset()

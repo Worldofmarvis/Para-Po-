@@ -1,10 +1,6 @@
 package com.parapo.ui
 
 import android.app.Activity
-import android.media.AudioAttributes
-import android.media.RingtoneManager
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -61,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.parapo.alert.AlertManager
+import com.parapo.alert.EscalationStep
 import com.parapo.trip.TripController
 import com.parapo.trip.TripPhase
 import com.parapo.ui.components.Sulo
@@ -94,6 +92,7 @@ private val PulseBlue = Color(0xFF9AD2FF)
 fun AlertScreen(onAwake: () -> Unit) {
     val context = LocalContext.current
     val trip by TripController.state.collectAsState()
+    val escalationStep by AlertManager.step.collectAsState()
 
     BackHandler(enabled = true) { /* only "GISING NA AKO" can dismiss */ }
 
@@ -103,31 +102,26 @@ fun AlertScreen(onAwake: () -> Unit) {
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
-    // Step 1 of the ladder: vibrate (0.8 s buzz, then pause, repeating)
+    // Delegate escalation (vibrate -> sound -> full-screen) to AlertManager so it works with screen off too.
+    // For the S3 "Test alert" shortcut (phase == IDLE), starts AlertManager with SMS disabled.
     val periodMs = Constants.VIBRATE_REPEAT_S * 1000L
     DisposableEffect(Unit) {
-        val vibrator = context.getSystemService(Vibrator::class.java)
-        vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0L, 800L, periodMs - 800L), 0))
-        onDispose { vibrator?.cancel() }
-    }
-
-    // Step 2 of the ladder: alarm sound after a delay
-    val ringtone = remember {
-        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        if (uri == null) null else RingtoneManager.getRingtone(context, uri)?.apply {
-            audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            isLooping = true
+        val appCtx = context.applicationContext
+        val startedLocally = !com.parapo.alert.AlertManager.isActive()
+        if (startedLocally) {
+            val remaining = if (trip.phase == TripPhase.ALERTING) trip.remainingM else null
+            com.parapo.alert.AlertManager.start(
+                context = appCtx,
+                remainingM = remaining,
+                allowSms = false
+            )
+        }
+        onDispose {
+            if (startedLocally) {
+                com.parapo.alert.AlertManager.stop(appCtx)
+            }
         }
     }
-    LaunchedEffect(Unit) {
-        delay(Constants.SOUND_AFTER_S * 1000L)
-        ringtone?.play()
-    }
-    DisposableEffect(Unit) { onDispose { ringtone?.stop() } }
 
     // Calm blue pulse behind Sulo: two slow ripples plus a faintly breathing glow (always running)
     val pulse = rememberInfiniteTransition(label = "pulse")
@@ -290,7 +284,32 @@ fun AlertScreen(onAwake: () -> Unit) {
                 )
             }
 
-            Spacer(Modifier.height(22.dp))
+            // 3 escalation step dots (Build Guide 6.3: vibrate -> sound -> full-screen)
+            val activeDots = when (escalationStep) {
+                EscalationStep.FULL_SCREEN -> 3
+                EscalationStep.SOUND -> 2
+                EscalationStep.VIBRATING -> 1
+                EscalationStep.IDLE -> 1
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(3) { idx ->
+                    val filled = idx < activeDots
+                    Box(
+                        modifier = Modifier
+                            .size(if (filled) 11.dp else 9.dp)
+                            .background(
+                                color = if (filled) Color.White else Color.White.copy(alpha = 0.35f),
+                                shape = CircleShape
+                            )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
             Text(
                 "Tap the button to stop the alert",
                 fontSize = 15.sp, color = Color.White.copy(alpha = 0.85f), textAlign = TextAlign.Center

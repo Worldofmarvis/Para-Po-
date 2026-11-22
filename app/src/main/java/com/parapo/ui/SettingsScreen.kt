@@ -138,13 +138,21 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                     color = SuccessGreen.copy(alpha = 0.14f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = pinFeedback!!,
-                        color = InkNavy,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(12.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = pinFeedback!!,
+                            color = InkNavy,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { pinFeedback = null }) {
+                            Text("OK", color = ActionBlue, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
@@ -291,26 +299,48 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
 
                 Spacer(Modifier.height(8.dp))
 
-                ToggleRow(
-                    title = "Emergency SMS",
-                    subtitle = if (settings.smsEnabled && !settings.smsNumber.isNullOrBlank()) {
-                        "Sends alert SMS to ${settings.smsNumber}"
-                    } else {
-                        "Optional: notify a contact when an alert triggers."
-                    },
-                    checked = settings.smsEnabled,
-                    onCheckedChange = { wantOn ->
-                        if (wantOn) {
-                            if (PermissionHelper.hasSmsPermission(context)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (settings.smsEnabled) {
+                                showSmsDialog = true
+                            } else if (PermissionHelper.hasSmsPermission(context)) {
                                 showSmsDialog = true
                             } else {
                                 smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
                             }
-                        } else {
-                            SettingsStore.update(appContext) { it.copy(smsEnabled = false) }
-                        }
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text("Emergency SMS", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = InkNavy)
+                        Text(
+                            text = if (settings.smsEnabled && !settings.smsNumber.isNullOrBlank()) {
+                                "Sends alert SMS to ${settings.smsNumber} (tap to edit)"
+                            } else {
+                                "Optional: notify a contact when an alert triggers."
+                            },
+                            fontSize = 13.sp,
+                            color = MetaNavy
+                        )
                     }
-                )
+                    Switch(
+                        checked = settings.smsEnabled,
+                        onCheckedChange = { wantOn ->
+                            if (wantOn) {
+                                if (PermissionHelper.hasSmsPermission(context)) {
+                                    showSmsDialog = true
+                                } else {
+                                    smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                                }
+                            } else {
+                                SettingsStore.update(appContext) { it.copy(smsEnabled = false) }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = ActionBlue)
+                    )
+                }
             }
 
             // Change PIN
@@ -333,28 +363,36 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
     }
 
     if (showSmsDialog) {
+        var smsError by remember { mutableStateOf<String?>(null) }
         AlertDialog(
             onDismissRequest = { showSmsDialog = false },
             title = { Text("Emergency SMS Contact") },
             text = {
-                OutlinedTextField(
-                    value = smsInput,
-                    onValueChange = { smsInput = it },
-                    singleLine = true,
-                    label = { Text("Phone number (e.g. 0917...)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = smsInput,
+                        onValueChange = { smsInput = it; smsError = null },
+                        singleLine = true,
+                        label = { Text("Phone number (e.g. 0917...)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+                    )
+                    if (smsError != null) {
+                        Text(smsError!!, color = AlertOrange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         val trimmed = smsInput.trim()
-                        if (trimmed.isNotEmpty()) {
+                        if (trimmed.length < 7) {
+                            smsError = "Enter a valid phone number."
+                        } else {
                             SettingsStore.update(appContext) {
                                 it.copy(smsEnabled = true, smsNumber = trimmed)
                             }
+                            showSmsDialog = false
                         }
-                        showSmsDialog = false
                     }
                 ) { Text("Save") }
             },

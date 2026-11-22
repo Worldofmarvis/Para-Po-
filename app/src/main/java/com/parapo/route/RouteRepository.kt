@@ -144,6 +144,29 @@ class RouteRepository(context: Context) {
             }
         }
 
+    /** Looks up a readable place/street name for a tapped map point (online), or null if offline. */
+    suspend fun reverseGeocode(point: GeoPoint): String? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (hasRealKey(BuildConfig.MAPTILER_KEY)) {
+                    val coords = String.format(Locale.US, "%.6f,%.6f", point.longitude, point.latitude)
+                    val url = "https://api.maptiler.com/geocoding/$coords.json?key=${BuildConfig.MAPTILER_KEY}&limit=1"
+                    val features = JSONObject(request(url, "GET", null, null)).getJSONArray("features")
+                    if (features.length() > 0) {
+                        val f = features.getJSONObject(0)
+                        f.optString("place_name").ifBlank { f.optString("text") }.ifBlank { null }
+                    } else null
+                } else {
+                    val url = String.format(
+                        Locale.US,
+                        "https://nominatim.openstreetmap.org/reverse?format=json&lat=%.6f&lon=%.6f",
+                        point.latitude, point.longitude
+                    )
+                    JSONObject(request(url, "GET", null, null)).optString("display_name").ifBlank { null }
+                }
+            }.getOrNull()
+        }
+
     // ----------------------------------------------------------------- http
 
     /** Pulls the human-readable message out of an ORS / MapTiler error body. */

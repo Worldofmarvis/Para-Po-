@@ -11,6 +11,8 @@ import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.parapo.distance.DistanceEngine
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -18,6 +20,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.osmdroid.util.GeoPoint
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -120,21 +124,121 @@ class FusedLocationSource(
         }
     }
 
+    companion object {
+        /** Shared in-memory cache of the most recent live fix so S3 Home and S4 Trip Setup stay in sync. */
+        @Volatile
+        var lastFetched: GeoPoint? = null
+    }
+
+    fun isLocationEnabled(): Boolean = runCatching {
+        locationManager?.isLocationEnabled == true
+    }.getOrDefault(true)
+
     @SuppressLint("MissingPermission")
     private fun registerGps(profile: SamplingProfile, listener: LocationListener) {
         val lm = locationManager ?: return
         runCatching {
             lm.removeUpdates(listener)
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                lm.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    profile.minUpdateIntervalMs,
-                    0f,
-                    listener,
-                    Looper.getMainLooper()
-                )
+            val provider = when {
+                lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                else -> null
+            } ?: return
+            lm.requestLocationUpdates(
+                provider,
+                profile.minUpdateIntervalMs,
+                0f,
+                listener,
+                Looper.getMainLooper()
+            )
+        }
+    }
+
+    /**
+     * Actively requests a fresh live fix by racing Fused (Balanced + High Accuracy) and direct
+     * LocationManager (GPS + Network) in parallel and taking the first fix that arrives.
+     * Works reliably on both GPS phones and Wi-Fi-only tablets (e.g. OPPO Pad SE).
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun currentPoint(timeoutMs: Long = 6_000L): GeoPoint? {
+        val fresh = withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<GeoPoint?> { cont ->
+                val done = java.util.concurrent.atomic.AtomicBoolean(false)
+                var fusedBalancedCb: LocationCallback? = null
+                var fusedHighCb: LocationCallback? = null
+                var osListener: LocationListener? = null
+                val cts = CancellationTokenSource()
+
+                fun cleanup() {
+                    cts.cancel()
+                    fusedBalancedCb?.let { runCatching { client.removeLocationUpdates(it) } }
+                    fusedHighCb?.let { runCatching { client.removeLocationUpdates(it) } }
+                    osListener?.let { runCatching { locationManager?.removeUpdates(it) } }
+                }
+
+                fun deliver(loc: Location?) {
+                    if (loc == null) return
+                    if (done.compareAndSet(false, true)) {
+                        val pt = GeoPoint(loc.latitude, loc.longitude)
+                        lastFetched = pt
+                        cleanup()
+                        if (cont.isActive) cont.resume(pt)
+                    }
+                }
+
+                cont.invokeOnCancellation {
+                    done.set(true)
+                    cleanup()
+                }
+
+                // 1) Fused getCurrentLocation (balanced = fast Wi-Fi/network lock)
+                runCatching {
+                    client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+                        .addOnSuccessListener { deliver(it) }
+                }
+
+                // 2) Active 1-shot Fused updates (Balanced + High Accuracy)
+                val balCb = object : LocationCallback() {
+                    override fun onLocationResult(result: LocationResult) = deliver(result.lastLocation)
+                }.also { fusedBalancedCb = it }
+                val highCb = object : LocationCallback() {
+                    override fun onLocationResult(result: LocationResult) = deliver(result.lastLocation)
+                }.also { fusedHighCb = it }
+
+                runCatching {
+                    val balReq = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 1_000L)
+                        .setMaxUpdates(1)
+                        .build()
+                    client.requestLocationUpdates(balReq, balCb, Looper.getMainLooper())
+                }
+                runCatching {
+                    val highReq = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1_000L)
+                        .setMaxUpdates(1)
+                        .build()
+                    client.requestLocationUpdates(highReq, highCb, Looper.getMainLooper())
+                }
+
+                // 3) Direct LocationManager listeners (NETWORK + GPS) for tablets where Play Services stalls
+                val lm = locationManager
+                if (lm != null) {
+                    val listener = object : LocationListener {
+                        override fun onLocationChanged(location: Location) = deliver(location)
+                        @Deprecated("Required on older APIs")
+                        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                        override fun onProviderEnabled(provider: String) {}
+                        override fun onProviderDisabled(provider: String) {}
+                    }.also { osListener = it }
+                    listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).forEach { p ->
+                        runCatching {
+                            if (lm.isProviderEnabled(p)) {
+                                lm.requestLocationUpdates(p, 500L, 0f, listener, Looper.getMainLooper())
+                            }
+                        }
+                    }
+                }
             }
         }
+        return fresh ?: lastKnownPoint()
     }
 
     @SuppressLint("MissingPermission")
@@ -148,11 +252,22 @@ class FusedLocationSource(
                     .addOnFailureListener { cont.resume(null) }
             }.onFailure { cont.resume(null) }
         }
-        if (fused != null) return fused
-        return runCatching {
-            locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                ?.let { GeoPoint(it.latitude, it.longitude) }
+        if (fused != null) {
+            lastFetched = fused
+            return fused
+        }
+        val cached = runCatching {
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+            )
+            providers.firstNotNullOfOrNull { p ->
+                runCatching { locationManager?.getLastKnownLocation(p) }.getOrNull()
+            }?.let { GeoPoint(it.latitude, it.longitude) }
         }.getOrNull()
+        if (cached != null) lastFetched = cached
+        return cached ?: lastFetched
     }
 }
 

@@ -16,8 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DirectionsBus
-import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.CellTower
+import androidx.compose.material.icons.filled.GpsOff
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
@@ -59,42 +59,42 @@ fun SummaryScreen(onSave: () -> Unit) {
             .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
 
         // Arrived pose (already includes the green check)
         Image(
             painter = painterResource(R.drawable.sulo_arrived),
             contentDescription = "Sulo has arrived",
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxWidth(0.8f).height(190.dp)
+            modifier = Modifier.fillMaxWidth(0.75f).height(150.dp)
         )
 
-        Spacer(Modifier.height(12.dp))
-        Text("You have arrived!", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = InkNavy)
-        Text("Salamat sa biyahe!", fontSize = 16.sp, color = InkNavy.copy(alpha = 0.7f), modifier = Modifier.padding(top = 4.dp))
+        Spacer(Modifier.height(8.dp))
+        Text("You have arrived!", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = InkNavy)
+        Text("Salamat sa biyahe!", fontSize = 15.sp, color = InkNavy.copy(alpha = 0.7f), modifier = Modifier.padding(top = 2.dp))
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SurfaceLight, RoundedCornerShape(20.dp))
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            ResultRow(Icons.Filled.DirectionsBus, "Total Ride", s.totalRideM?.let { fmtKm(it) } ?: "—")
-            ResultRow(Icons.Filled.Schedule, "Duration", s.durationS?.let { fmtDuration(it) } ?: "—")
-            ResultRow(Icons.Filled.GpsFixed, "GPS Active", s.gpsActiveS?.let { fmtSpan(it) } ?: "—")
             ResultRow(Icons.Filled.NotificationsActive, "Alert fired at", s.firedAtRemainingM?.let { fmtKm(it) } ?: "—")
+            ResultRow(Icons.Filled.Schedule, "Duration", s.durationS?.let { fmtDuration(it) } ?: "—")
+            ResultRow(Icons.Filled.GpsOff, "GPS lost for", s.gpsLostS?.let { fmtSpan(it) } ?: "—")
+            ResultRow(Icons.Filled.CellTower, "Fingerprints saved", "${s.fingerprintsSaved}")
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(20.dp))
 
         Button(
             onClick = onSave,
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White),
-            modifier = Modifier.fillMaxWidth().height(56.dp)
+            modifier = Modifier.fillMaxWidth().height(54.dp)
         ) {
             Text("Save to My Trips", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
@@ -104,7 +104,7 @@ fun SummaryScreen(onSave: () -> Unit) {
 @Composable
 private fun ResultRow(icon: ImageVector, label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(56.dp),
+        modifier = Modifier.fillMaxWidth().height(48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, contentDescription = null, tint = ActionBlue, modifier = Modifier.size(26.dp))

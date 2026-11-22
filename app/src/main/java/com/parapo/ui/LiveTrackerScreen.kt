@@ -219,7 +219,8 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
             val (srcText, srcColor) = when (ui.source) {
                 PositionSourceKind.GPS -> "GPS" to SuccessGreen
                 PositionSourceKind.CELL -> "Cell fallback" to PrimaryBlue
-                PositionSourceKind.DEAD_RECKONING -> "Dead reckoning" to AlertOrange
+                PositionSourceKind.DEAD_RECKONING ->
+                    (if (ui.lowConfidence) "Dead reckoning (low)" else "Dead reckoning") to AlertOrange
             }
             Chip(text = srcText, color = srcColor)
             val samplingLabel = when (ui.samplingTier) {
@@ -281,10 +282,18 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
                     )
                 }
 
-                val line = if (ui.source != PositionSourceKind.GPS) {
-                    "Walang GPS? Okay lang, naririnig ko ang mga tower."
-                } else {
-                    "Fast-moving! Almost there!"
+                if (ui.lowConfidence) {
+                    Text(
+                        "GPS lost over 3 min: estimate is low confidence, alert margin widened.",
+                        fontSize = 12.sp, color = AlertOrange, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                val line = when {
+                    ui.source != PositionSourceKind.GPS -> "Walang GPS? Okay lang, naririnig ko ang mga tower."
+                    ui.speedMps >= 8.0 -> "Fast-moving! Almost there!"
+                    else -> "Pikit ka lang, ako na ang magbabantay."
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(top = 6.dp),

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -43,6 +44,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -114,7 +116,8 @@ data class TripSetupResult(
     val alertDistanceM: Int,
     val routeKm: Double,          // road km from ORS, or straight-line x 1.25 if no route
     val originLat: Double = 13.7847,   // where the trip starts (S5 reloads the cached route with this)
-    val originLon: Double = 121.0735
+    val originLon: Double = 121.0735,
+    val destName: String? = null
 )
 
 // Placeholder origin (BatStateU Alangilan). Replace with LocationSource's last fix in Week 2.
@@ -239,8 +242,12 @@ fun TripSetupScreen(
     val anim = remember { Animatable(0f) }
     val savedSettings = remember { SettingsStore.current(ctx.applicationContext) }
 
-    var origin by remember { mutableStateOf(DEFAULT_ORIGIN) }
+    var origin by remember { mutableStateOf(FusedLocationSource.lastFetched ?: DEFAULT_ORIGIN) }
     var dest by remember { mutableStateOf<GeoPoint?>(null) }
+    var pendingPin by remember { mutableStateOf<GeoPoint?>(null) }
+    var pendingPinName by remember { mutableStateOf<String?>(null) }
+    var pendingPinLookingUp by remember { mutableStateOf(false) }
+    var gpsStatusMsg by remember { mutableStateOf<String?>(null) }
     var vehicle by remember { mutableStateOf("JEEPNEY") }
     var alertKm by remember {
         mutableFloatStateOf((savedSettings.alertDistanceM / 1000f).coerceIn(1f, 5f))
@@ -248,14 +255,23 @@ fun TripSetupScreen(
     var sheetHeight by remember { mutableStateOf(0.dp) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
 
-    // Fetch real last-known GPS fix if location permission is granted (Phase 1 + Phase 3)
+    // Fetch cached fix right away, then request a fresh live lock (supports both GPS phones and Wi-Fi tablets)
     LaunchedEffect(Unit) {
         if (PermissionHelper.hasFineLocation(ctx)) {
-            val live = FusedLocationSource(ctx.applicationContext).lastKnownPoint()
-            if (live != null) {
-                origin = live
-                if (dest == null) mapRef?.controller?.animateTo(live)
+            val locSource = FusedLocationSource(ctx.applicationContext)
+            locSource.lastKnownPoint()?.let { cached ->
+                origin = cached
             }
+            locSource.currentPoint()?.let { fresh ->
+                origin = fresh
+            }
+        }
+    }
+
+    // Always keep the map centered on the live origin once MapView is ready (fixes mapRef-null race)
+    LaunchedEffect(origin, mapRef) {
+        if (dest == null) {
+            mapRef?.controller?.animateTo(origin)
         }
     }
 
@@ -292,14 +308,20 @@ fun TripSetupScreen(
         }
     }
 
-    // Fetch the road route whenever the stop or origin changes, then draw it
-    LaunchedEffect(dest, origin) {
+    // Fetch the road route whenever the stop, origin, or vehicle mode changes, then draw it.
+    // Part 1 & Part 8 #6: ORS has no rail profile, so Train trips use the straight-line fallback.
+    LaunchedEffect(dest, origin, vehicle) {
         val d = dest
         route = null
         routeFailed = false
         routeError = null
         anim.snapTo(0f)
         if (d == null) return@LaunchedEffect
+        if (vehicle == "TRAIN") {
+            routeFailed = true
+            routeError = "ORS has no rail profile"
+            return@LaunchedEffect
+        }
         routeLoading = true
         repo.fetchRoute(origin, d)
             .onSuccess { route = it }
@@ -313,13 +335,24 @@ fun TripSetupScreen(
     val displayKm: Double? = mapRoute?.let { it.distanceM / 1000.0 }
         ?: dest?.let { haversineM(origin, it) * savedSettings.roadFactor / 1000.0 }
 
-    val onTap by rememberUpdatedState<(GeoPoint) -> Unit> {
+    val onTap by rememberUpdatedState<(GeoPoint) -> Unit> { tapped ->
         focus.clearFocus()
         results = emptyList()
-        dest = it
+        searchMsg = null
+        pendingPin = tapped
+        pendingPinName = null
+        pendingPinLookingUp = true
+        scope.launch {
+            val resolved = repo.reverseGeocode(tapped)
+            if (pendingPin == tapped) {
+                pendingPinName = resolved
+                pendingPinLookingUp = false
+            }
+        }
     }
 
     val redPin = remember { pinDrawable(ctx, DangerRed.toArgb()) }
+    val amberPin = remember { pinDrawable(ctx, AlertAmber.toArgb()) }
     val userDot = remember { userDotDrawable(ctx, PrimaryBlue.toArgb()) }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFE8EEF4))) {
@@ -327,7 +360,7 @@ fun TripSetupScreen(
         // ---- Map ----
         val mapBottomPad: Dp = max(0f, (sheetHeight - SHEET_CORNER).value).dp
         val mapDest = dest
-        val straightFallback = routeFailed && mapDest != null
+        val mapPending = pendingPin
         AndroidView(
             modifier = Modifier.fillMaxSize().padding(bottom = mapBottomPad),
             factory = { c ->
@@ -337,7 +370,7 @@ fun TripSetupScreen(
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     minZoomLevel = 4.0
                     controller.setZoom(14.0)
-                    controller.setCenter(DEFAULT_ORIGIN)
+                    controller.setCenter(origin)
                     mapRef = this
                 }
             },
@@ -353,7 +386,7 @@ fun TripSetupScreen(
 
                 val line: List<GeoPoint> = when {
                     mapRoute != null && cum != null -> partialPoints(mapRoute.points, cum, frac)
-                    straightFallback && mapDest != null -> listOf(origin, mapDest)
+                    routeFailed && mapDest != null -> listOf(origin, mapDest)
                     else -> emptyList()
                 }
                 if (line.size >= 2) {
@@ -376,6 +409,14 @@ fun TripSetupScreen(
                     map.overlays.add(Marker(map).apply {
                         position = mapDest
                         icon = redPin
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        infoWindow = null
+                    })
+                }
+                if (mapPending != null) {
+                    map.overlays.add(Marker(map).apply {
+                        position = mapPending
+                        icon = amberPin
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         infoWindow = null
                     })
@@ -410,6 +451,7 @@ fun TripSetupScreen(
 
         // ---- Distance / status chip (under the search bar) ----
         val chipText = when {
+            gpsStatusMsg != null -> gpsStatusMsg!!
             dest == null -> "Search or tap the map to set your stop"
             routeLoading -> "Finding the road route\u2026"
             routeFailed -> "No road route: ${routeError ?: "unknown"}. Estimate ~${"%.1f".format(displayKm ?: 0.0)} km (x 1.25)"
@@ -417,7 +459,7 @@ fun TripSetupScreen(
         }
         Surface(
             shape = RoundedCornerShape(50),
-            color = if (routeFailed) AlertAmber else PrimaryBlue,
+            color = if (routeFailed || gpsStatusMsg != null) AlertAmber else PrimaryBlue,
             shadowElevation = 6.dp,
             modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 72.dp, start = 16.dp, end = 16.dp)
         ) {
@@ -436,7 +478,29 @@ fun TripSetupScreen(
             modifier = Modifier.align(Alignment.BottomEnd)
                 .padding(end = 14.dp, bottom = sheetHeight + 14.dp).size(48.dp)
         ) {
-            IconButton(onClick = { mapRef?.controller?.animateTo(DEFAULT_ORIGIN) }) {
+            IconButton(onClick = {
+                mapRef?.controller?.animateTo(origin)
+                if (!PermissionHelper.hasFineLocation(ctx)) {
+                    gpsStatusMsg = "Allow Precise Location in Permissions first"
+                } else {
+                    val locSource = FusedLocationSource(ctx.applicationContext)
+                    if (!locSource.isLocationEnabled()) {
+                        gpsStatusMsg = "Location is off — turn on Location in settings"
+                    } else {
+                        gpsStatusMsg = "Reloading GPS\u2026"
+                        scope.launch {
+                            val live = locSource.currentPoint()
+                            if (live != null) {
+                                origin = live
+                                mapRef?.controller?.animateTo(live)
+                                gpsStatusMsg = null
+                            } else {
+                                gpsStatusMsg = "No GPS fix yet — enable Wi-Fi/Location and retry"
+                            }
+                        }
+                    }
+                }
+            }) {
                 Icon(Icons.Filled.MyLocation, contentDescription = "My location", tint = PrimaryBlue)
             }
         }
@@ -512,7 +576,7 @@ fun TripSetupScreen(
                         val d = dest ?: return@Button
                         val result = TripSetupResult(
                             d.latitude, d.longitude, vehicle, (alertKm * 1000).toInt(), displayKm ?: 0.0,
-                            origin.latitude, origin.longitude
+                            origin.latitude, origin.longitude, pickedName
                         )
                         scope.launch {
                             starting = true
@@ -560,7 +624,7 @@ fun TripSetupScreen(
                         leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = PrimaryBlue) },
                         trailingIcon = {
                             if (query.isNotEmpty()) {
-                                IconButton(onClick = { query = ""; pickedName = null; results = emptyList() }) {
+                                IconButton(onClick = { query = ""; pickedName = null; results = emptyList(); searchMsg = null }) {
                                     Icon(Icons.Filled.Close, contentDescription = "Clear", tint = Muted)
                                 }
                             }
@@ -619,5 +683,55 @@ fun TripSetupScreen(
                 }
             }
         }
+    }
+
+    pendingPin?.let { pin ->
+        val coordsText = String.format(java.util.Locale.US, "%.5f, %.5f", pin.latitude, pin.longitude)
+        val placeLabel = when {
+            pendingPinLookingUp -> "Looking up place name\u2026"
+            !pendingPinName.isNullOrBlank() -> pendingPinName!!
+            else -> "Pinned location"
+        }
+        AlertDialog(
+            onDismissRequest = {
+                pendingPin = null
+                pendingPinName = null
+                pendingPinLookingUp = false
+            },
+            title = { Text("Set this as your stop?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(placeLabel, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = DeepBlue)
+                    Text("Coordinates: $coordsText", fontSize = 13.sp, color = Muted)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosenName = pendingPinName
+                    dest = pin
+                    gpsStatusMsg = null
+                    if (!chosenName.isNullOrBlank()) {
+                        pickedName = chosenName
+                        query = chosenName
+                    } else {
+                        pickedName = null
+                    }
+                    pendingPin = null
+                    pendingPinName = null
+                    pendingPinLookingUp = false
+                }) {
+                    Text("Confirm Stop", fontWeight = FontWeight.Bold, color = PrimaryBlue)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingPin = null
+                    pendingPinName = null
+                    pendingPinLookingUp = false
+                }) {
+                    Text("Cancel", color = Muted)
+                }
+            }
+        )
     }
 }

@@ -54,7 +54,8 @@ data class TripUiState(
     val gpsLostS: Long = 0L,
     val newFingerprints: Int = 0,
     val samplingTier: SamplingTier = SamplingTier.FAR_SCREEN_ON,
-    val firedAtRemainingM: Double? = null
+    val firedAtRemainingM: Double? = null,
+    val startedAtMs: Long = 0L
 )
 
 /**
@@ -68,15 +69,25 @@ object TripController {
     val state: StateFlow<TripUiState> = _state.asStateFlow()
     private var job: Job? = null
     private var motionMonitor: MotionMonitor? = null
+    private var lastContext: Context? = null
 
     fun start(
         setup: TripSetupResult,
         appContext: Context,
         customSource: LocationSource? = null,
-        customCellProvider: CellProvider? = null
+        customCellProvider: CellProvider? = null,
+        startService: Boolean = true
     ) {
         stopInternal()
-        _state.value = TripUiState(phase = TripPhase.ARMED, setup = setup)
+        lastContext = appContext.applicationContext
+        _state.value = TripUiState(
+            phase = TripPhase.ARMED,
+            setup = setup,
+            startedAtMs = System.currentTimeMillis()
+        )
+        if (startService) {
+            TripService.startService(appContext.applicationContext, setup)
+        }
         job = scope.launch {
             val settings = SettingsStore.current(appContext)
             val origin = GeoPoint(setup.originLat, setup.originLon)
@@ -85,8 +96,13 @@ object TripController {
                 origin.latitude, origin.longitude, dest.latitude, dest.longitude
             )
 
-            // Route comes from the local cache saved on S4 (works offline)
-            val route = RouteRepository(appContext).fetchRoute(origin, dest).getOrNull()
+            // Route comes from the local cache saved on S4 (works offline).
+            // Part 1 & Part 8 #6: ORS has no rail profile, so Train uses straight-line x 1.25.
+            val route = if (setup.vehicle == "TRAIN") {
+                null
+            } else {
+                RouteRepository(appContext).fetchRoute(origin, dest).getOrNull()
+            }
             val straight = route == null
             val pts = route?.points ?: listOf(origin, dest)
             val engine = DistanceEngine(pts, if (straight) settings.roadFactor else 1.0)
@@ -322,6 +338,10 @@ object TripController {
 
     /** User tapped "GISING NA AKO". */
     fun dismissAlert() {
+        lastContext?.let {
+            com.parapo.alert.AlertManager.stop(it)
+            TripService.stopService(it)
+        }
         if (_state.value.phase == TripPhase.ALERTING) {
             _state.value = _state.value.copy(phase = TripPhase.COMPLETED)
         }
@@ -330,6 +350,10 @@ object TripController {
     /** Cancel Trip, or finishing after the summary. */
     fun reset() {
         stopInternal()
+        lastContext?.let {
+            com.parapo.alert.AlertManager.stop(it)
+            TripService.stopService(it)
+        }
         _state.value = TripUiState()
     }
 
