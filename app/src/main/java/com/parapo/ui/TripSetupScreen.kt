@@ -352,6 +352,7 @@ fun TripSetupScreen(
     val redPin = remember { pinDrawable(ctx, DangerRed.toArgb()) }
     val amberPin = remember { pinDrawable(ctx, AlertAmber.toArgb()) }
     val userDot = remember { userDotDrawable(ctx, PrimaryBlue.toArgb()) }
+    val alertMarkIcon = remember { alertMarkDrawable(ctx) }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFE8EEF4))) {
 
@@ -359,6 +360,7 @@ fun TripSetupScreen(
         val mapBottomPad: Dp = max(0f, (sheetHeight - SHEET_CORNER).value).dp
         val mapDest = dest
         val mapPending = pendingPin
+        val mapAlertM = alertKm * 1000.0 // read here so the mark follows the slider
         AndroidView(
             modifier = Modifier.fillMaxSize().padding(bottom = mapBottomPad),
             factory = { c ->
@@ -401,6 +403,22 @@ fun TripSetupScreen(
                         outlinePaint.strokeWidth = 11f
                         outlinePaint.strokeCap = Paint.Cap.ROUND
                         outlinePaint.strokeJoin = Paint.Join.ROUND
+                    })
+                }
+                // Where the alert will pop up, at the chosen alert distance before the stop
+                // (waits for the route line to finish drawing so it doesn't float ahead of it)
+                val markPoint = when {
+                    mapRoute != null && frac >= 1f -> alertMarkPoint(mapRoute.points, 1.0, mapAlertM)
+                    mapRoute == null && routeFailed && mapDest != null ->
+                        alertMarkPoint(listOf(origin, mapDest), savedSettings.roadFactor, mapAlertM)
+                    else -> null
+                }
+                if (markPoint != null) {
+                    map.overlays.add(Marker(map).apply {
+                        position = markPoint
+                        icon = alertMarkIcon
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        infoWindow = null
                     })
                 }
                 if (mapDest != null) {

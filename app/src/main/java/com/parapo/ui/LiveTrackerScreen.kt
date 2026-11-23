@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.parapo.R
 import com.parapo.location.SamplingTier
+import com.parapo.storage.SettingsStore
 import com.parapo.trip.PositionSourceKind
 import com.parapo.trip.TripController
 import com.parapo.trip.TripPhase
@@ -137,6 +138,14 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
     val redPin = remember { pinDrawable(ctx, DangerRed.toArgb()) }
     val userDot = remember { userDotDrawable(ctx, PrimaryBlue.toArgb()) }
     val dest = remember(ui.setup) { ui.setup?.let { GeoPoint(it.destLat, it.destLon) } }
+    val alertMarkIcon = remember { alertMarkDrawable(ctx) }
+    // Same distance the trip uses: this trip's alert distance, else the saved setting.
+    val alertDistM = ui.setup?.alertDistanceM?.takeIf { it > 0 }
+        ?: SettingsStore.current(ctx.applicationContext).alertDistanceM
+    val alertMark = remember(ui.routePoints, ui.usingStraightLine, alertDistM) {
+        val scale = if (ui.usingStraightLine) SettingsStore.current(ctx.applicationContext).roadFactor else 1.0
+        alertMarkPoint(ui.routePoints, scale, alertDistM.toDouble())
+    }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFE8EEF4))) {
 
@@ -171,6 +180,14 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
                         outlinePaint.strokeWidth = 11f
                         outlinePaint.strokeCap = Paint.Cap.ROUND
                         outlinePaint.strokeJoin = Paint.Join.ROUND
+                    })
+                }
+                alertMark?.let { a ->
+                    map.overlays.add(Marker(map).apply {
+                        position = a
+                        icon = alertMarkIcon
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        infoWindow = null
                     })
                 }
                 dest?.let { d ->

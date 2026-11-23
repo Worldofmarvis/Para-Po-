@@ -4,6 +4,15 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -171,14 +181,14 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                         color = ActionBlue
                     )
                 }
-                Slider(
+                CircleSlider(
                     value = settings.alertDistanceM.toFloat(),
                     onValueChange = { v ->
                         val snapped = (v / 250f).roundToInt() * 250
                         SettingsStore.update(appContext) { it.copy(alertDistanceM = snapped) }
                     },
                     valueRange = 1000f..5000f,
-                    colors = SliderDefaults.colors(thumbColor = ActionBlue, activeTrackColor = ActionBlue)
+                    steps = 15
                 )
                 Text(
                     text = "Maximum distance before your stop to trigger vibration (vibration is always on).",
@@ -201,14 +211,14 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                         color = ActionBlue
                     )
                 }
-                Slider(
+                CircleSlider(
                     value = settings.safetyMarginM.toFloat(),
                     onValueChange = { v ->
                         val snapped = (v / 100f).roundToInt() * 100
                         SettingsStore.update(appContext) { it.copy(safetyMarginM = snapped) }
                     },
                     valueRange = 200f..1000f,
-                    colors = SliderDefaults.colors(thumbColor = ActionBlue, activeTrackColor = ActionBlue)
+                    steps = 7
                 )
                 Text(
                     text = "Extra distance added when GPS is lost and cell/dead reckoning is active.",
@@ -228,13 +238,13 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                     }
                 )
                 if (settings.soundEnabled) {
-                    Slider(
+                    CircleSlider(
                         value = settings.soundAfterS.toFloat(),
                         onValueChange = { v ->
                             SettingsStore.update(appContext) { it.copy(soundAfterS = v.roundToInt()) }
                         },
                         valueRange = 5f..30f,
-                        colors = SliderDefaults.colors(thumbColor = ActionBlue, activeTrackColor = ActionBlue)
+                        steps = 24
                     )
                 } else {
                     Text(
@@ -257,13 +267,13 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                     }
                 )
                 if (settings.fullScreenEnabled) {
-                    Slider(
+                    CircleSlider(
                         value = settings.fullScreenAfterS.toFloat(),
                         onValueChange = { v ->
                             SettingsStore.update(appContext) { it.copy(fullScreenAfterS = v.roundToInt()) }
                         },
                         valueRange = 10f..60f,
-                        colors = SliderDefaults.colors(thumbColor = ActionBlue, activeTrackColor = ActionBlue)
+                        steps = 49
                     )
                 } else {
                     Text(
@@ -611,6 +621,61 @@ private fun ChangePinDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+
+/**
+ * Settings slider: round thumb (white ring + blue core, soft shadow) on a slim rounded track.
+ * The track is drawn here so there is no gap around the thumb (the newer Material 3 default
+ * leaves one) and no stop-indicator dots. [steps] makes it snap cleanly between values.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CircleSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val thumbSize = 28.dp
+    val trackHeight = 8.dp
+    val activeColor = ActionBlue
+    val inactiveColor = Color(0xFFD9EAFB)
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = valueRange,
+        steps = steps,
+        modifier = modifier,
+        interactionSource = interactionSource,
+        colors = SliderDefaults.colors(thumbColor = ActionBlue, activeTrackColor = ActionBlue),
+        thumb = {
+            Box(
+                Modifier
+                    .size(thumbSize)
+                    .shadow(4.dp, CircleShape)
+                    .background(Color.White, CircleShape)
+                    .padding(6.dp)
+                    .background(ActionBlue, CircleShape)
+            )
+        },
+        track = { state ->
+            val span = state.valueRange.endInclusive - state.valueRange.start
+            val fraction = if (span <= 0f) 0f else ((state.value - state.valueRange.start) / span).coerceIn(0f, 1f)
+            Canvas(Modifier.fillMaxWidth().height(thumbSize)) {
+                val h = trackHeight.toPx()
+                val top = (size.height - h) / 2f
+                val corner = CornerRadius(h / 2f)
+                val thumbPx = thumbSize.toPx()
+                // thumb centre travels from half a thumb in, to half a thumb short of the end
+                val cx = thumbPx / 2f + fraction * (size.width - thumbPx)
+                drawRoundRect(inactiveColor, Offset(0f, top), Size(size.width, h), corner)
+                drawRoundRect(activeColor, Offset(0f, top), Size(cx, h), corner)
+            }
         }
     )
 }
