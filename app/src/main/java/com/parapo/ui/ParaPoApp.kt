@@ -17,6 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -202,6 +205,20 @@ fun ParaPoApp() {
                 )
             }
             composable(Routes.ALERT) {
+                // If the alert is dismissed from the notification / AlertActivity (test alert only),
+                // close this in-app alert screen too so we land back on Home.
+                val alertStep by com.parapo.alert.AlertManager.step.collectAsState()
+                var alertWasActive by remember { mutableStateOf(false) }
+                LaunchedEffect(alertStep) {
+                    if (alertStep != com.parapo.alert.EscalationStep.IDLE) {
+                        alertWasActive = true
+                    } else if (alertWasActive &&
+                        trip.phase == TripPhase.IDLE &&
+                        navController.currentDestination?.route == Routes.ALERT
+                    ) {
+                        navController.popBackStack()
+                    }
+                }
                 AlertScreen(
                     onAwake = {
                         if (trip.phase == TripPhase.ALERTING) {
