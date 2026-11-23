@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.parapo.R
+import com.parapo.location.SamplingTier
 import com.parapo.trip.PositionSourceKind
 import com.parapo.trip.TripController
 import com.parapo.trip.TripPhase
@@ -145,7 +146,7 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(bottom = mapBottomPad),
             factory = { c ->
                 MapView(c).apply {
-                    setTileSource(MAPTILER)
+                    setTileSource(activeTileSource())
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     minZoomLevel = 4.0
@@ -218,10 +219,16 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
             val (srcText, srcColor) = when (ui.source) {
                 PositionSourceKind.GPS -> "GPS" to SuccessGreen
                 PositionSourceKind.CELL -> "Cell fallback" to PrimaryBlue
-                PositionSourceKind.DEAD_RECKONING -> "Dead reckoning" to AlertOrange
+                PositionSourceKind.DEAD_RECKONING ->
+                    (if (ui.lowConfidence) "Dead reckoning (low)" else "Dead reckoning") to AlertOrange
             }
             Chip(text = srcText, color = srcColor)
-            Chip(text = "Demo drive", color = MutedText)
+            val samplingLabel = when (ui.samplingTier) {
+                SamplingTier.NEAR -> "High acc"
+                SamplingTier.FAR_SCREEN_ON -> "Eco 5s"
+                SamplingTier.FAR_SCREEN_OFF -> "Eco 10s"
+            }
+            Chip(text = samplingLabel, color = MutedText)
         }
 
         // ---- My location button ----
@@ -275,10 +282,18 @@ private fun TrackerBody(ui: TripUiState, onCancelled: () -> Unit) {
                     )
                 }
 
-                val line = if (ui.source != PositionSourceKind.GPS) {
-                    "Walang GPS? Okay lang, naririnig ko ang mga tower."
-                } else {
-                    "Fast-moving! Almost there!"
+                if (ui.lowConfidence) {
+                    Text(
+                        "GPS lost over 3 min: estimate is low confidence, alert margin widened.",
+                        fontSize = 12.sp, color = AlertOrange, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                val line = when {
+                    ui.source != PositionSourceKind.GPS -> "Walang GPS? Okay lang, naririnig ko ang mga tower."
+                    ui.speedMps >= 8.0 -> "Fast-moving! Almost there!"
+                    else -> "Pikit ka lang, ako na ang magbabantay."
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(top = 6.dp),

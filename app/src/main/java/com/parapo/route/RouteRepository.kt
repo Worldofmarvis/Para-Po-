@@ -30,6 +30,11 @@ class RouteRepository(context: Context) {
 
     private val cacheDir = File(context.filesDir, "routes").apply { mkdirs() }
 
+    private fun hasRealKey(key: String): Boolean {
+        val k = key.trim()
+        return k.isNotBlank() && k != "dummy_key" && !k.startsWith("your_")
+    }
+
     // ---------------------------------------------------------------- route
 
     suspend fun fetchRoute(origin: GeoPoint, dest: GeoPoint): Result<RouteResult> =
@@ -47,25 +52,38 @@ class RouteRepository(context: Context) {
                         .getOrNull()?.let { return@runCatching it }
                 }
 
-                if (BuildConfig.ORS_API_KEY.isBlank()) throw IOException("No ORS key")
+                val text = if (hasRealKey(BuildConfig.ORS_API_KEY)) {
+                    val body = JSONObject().apply {
+                        put(
+                            "coordinates",
+                            JSONArray()
+                                .put(JSONArray().put(origin.longitude).put(origin.latitude))
+                                .put(JSONArray().put(dest.longitude).put(dest.latitude))
+                        )
+                        // let ORS snap a tapped point to the nearest road, however far
+                        put("radiuses", JSONArray().put(-1).put(-1))
+                    }.toString()
 
-                val body = JSONObject().apply {
-                    put(
-                        "coordinates",
-                        JSONArray()
-                            .put(JSONArray().put(origin.longitude).put(origin.latitude))
-                            .put(JSONArray().put(dest.longitude).put(dest.latitude))
+                    Log.d(TAG, "ORS request body: $body")
+                    request(
+                        "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+                        "POST", body, BuildConfig.ORS_API_KEY
                     )
-                    // let ORS snap a tapped point to the nearest road, however far
-                    put("radiuses", JSONArray().put(-1).put(-1))
-                }.toString()
-
-                Log.d(TAG, "ORS request body: $body")
-                val text = request(
-                    "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-                    "POST", body, BuildConfig.ORS_API_KEY
-                )
-                Log.d(TAG, "ORS OK, ${text.length} chars")
+                } else {
+                    // Keyless dev fallback: OSRM public driving route wrapped into the same GeoJSON format
+                    val osrmUrl = String.format(
+                        Locale.US,
+                        "https://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson",
+                        origin.longitude, origin.latitude, dest.longitude, dest.latitude
+                    )
+                    val osrmJson = JSONObject(request(osrmUrl, "GET", null, null))
+                    val firstRoute = osrmJson.getJSONArray("routes").getJSONObject(0)
+                    val feature = JSONObject()
+                        .put("geometry", firstRoute.getJSONObject("geometry"))
+                        .put("properties", JSONObject().put("summary", JSONObject().put("distance", firstRoute.getDouble("distance"))))
+                    JSONObject().put("features", JSONArray().put(feature)).toString()
+                }
+                Log.d(TAG, "Route OK, ${text.length} chars")
                 val result = parseRoute(text) // throws if incomplete
                 file.writeText(text)
                 result
@@ -95,20 +113,58 @@ class RouteRepository(context: Context) {
         withContext(Dispatchers.IO) {
             runCatching {
                 val q = URLEncoder.encode(query, "UTF-8").replace("+", "%20")
-                val url = "https://api.maptiler.com/geocoding/$q.json" +
-                    "?key=${BuildConfig.MAPTILER_KEY}&limit=6&country=ph" +
-                    "&proximity=${String.format(Locale.US, "%.5f,%.5f", nearLon, nearLat)}"
-                val features = JSONObject(request(url, "GET", null, null)).getJSONArray("features")
                 val out = ArrayList<PlaceResult>()
-                for (i in 0 until features.length()) {
-                    val f = features.getJSONObject(i)
-                    val center = f.optJSONArray("center") ?: continue
-                    val name = f.optString("place_name").ifBlank { f.optString("text") }
-                    if (name.isBlank()) continue
-                    out.add(PlaceResult(name, GeoPoint(center.getDouble(1), center.getDouble(0))))
+                if (hasRealKey(BuildConfig.MAPTILER_KEY)) {
+                    val url = "https://api.maptiler.com/geocoding/$q.json" +
+                        "?key=${BuildConfig.MAPTILER_KEY}&limit=6&country=ph" +
+                        "&proximity=${String.format(Locale.US, "%.5f,%.5f", nearLon, nearLat)}"
+                    val features = JSONObject(request(url, "GET", null, null)).getJSONArray("features")
+                    for (i in 0 until features.length()) {
+                        val f = features.getJSONObject(i)
+                        val center = f.optJSONArray("center") ?: continue
+                        val name = f.optString("place_name").ifBlank { f.optString("text") }
+                        if (name.isBlank()) continue
+                        out.add(PlaceResult(name, GeoPoint(center.getDouble(1), center.getDouble(0))))
+                    }
+                } else {
+                    // Keyless dev fallback: OpenStreetMap Nominatim (Philippines)
+                    val url = "https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&limit=6&q=$q"
+                    val arr = JSONArray(request(url, "GET", null, null))
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val name = item.optString("display_name")
+                        val lat = item.optString("lat").toDoubleOrNull()
+                        val lon = item.optString("lon").toDoubleOrNull()
+                        if (name.isNotBlank() && lat != null && lon != null) {
+                            out.add(PlaceResult(name, GeoPoint(lat, lon)))
+                        }
+                    }
                 }
                 out
             }
+        }
+
+    /** Looks up a readable place/street name for a tapped map point (online), or null if offline. */
+    suspend fun reverseGeocode(point: GeoPoint): String? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (hasRealKey(BuildConfig.MAPTILER_KEY)) {
+                    val coords = String.format(Locale.US, "%.6f,%.6f", point.longitude, point.latitude)
+                    val url = "https://api.maptiler.com/geocoding/$coords.json?key=${BuildConfig.MAPTILER_KEY}&limit=1"
+                    val features = JSONObject(request(url, "GET", null, null)).getJSONArray("features")
+                    if (features.length() > 0) {
+                        val f = features.getJSONObject(0)
+                        f.optString("place_name").ifBlank { f.optString("text") }.ifBlank { null }
+                    } else null
+                } else {
+                    val url = String.format(
+                        Locale.US,
+                        "https://nominatim.openstreetmap.org/reverse?format=json&lat=%.6f&lon=%.6f",
+                        point.latitude, point.longitude
+                    )
+                    JSONObject(request(url, "GET", null, null)).optString("display_name").ifBlank { null }
+                }
+            }.getOrNull()
         }
 
     // ----------------------------------------------------------------- http
@@ -116,10 +172,11 @@ class RouteRepository(context: Context) {
     /** Pulls the human-readable message out of an ORS / MapTiler error body. */
     private fun errorMessage(body: String): String = try {
         val o = JSONObject(body)
-        val e = o.opt("error")
+        val e: Any? = o.opt("error")
         when (e) {
             is JSONObject -> e.optString("message").ifBlank { e.toString() }
             is String -> e
+            null -> o.optString("message")
             else -> o.optString("message")
         }
     } catch (ex: Exception) {
@@ -133,6 +190,7 @@ class RouteRepository(context: Context) {
             c.connectTimeout = 10_000
             c.readTimeout = 10_000
             c.setRequestProperty("Accept", "application/geo+json, application/json")
+            c.setRequestProperty("User-Agent", "ParaPoApp/0.1.0 (CS312 BatStateU)")
             if (auth != null) c.setRequestProperty("Authorization", auth)
             if (body != null) {
                 c.doOutput = true

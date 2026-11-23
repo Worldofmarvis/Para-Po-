@@ -67,5 +67,9 @@ data class TripLog(
     val source: String,        // GPS, GPS+CELL, DEAD_RECKONING
     val gpsLostS: Int,
     val newFingerprints: Int,
-    val result: String         // ON_TIME or LATE
+    val result: String,        // ON_TIME or LATE
+    val routeLabel: String = "",
+    val totalDistanceM: Int = 0,
+    val batteryStartPct: Int = -1,
+    val batteryEndPct: Int = -1
 )

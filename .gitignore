@@ -3,8 +3,12 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
-# Secrets and machine-specific files (the ORS API key lives in local.properties)
+# Secrets and machine-specific files (API keys live in local.properties)
 local.properties
+.env
+*.jks
+*.keystore
+*.p12
 
 # IDE files
 .idea/
@@ -29,3 +33,20 @@ captures/
 *.before-diag
 s4-diag/
 install-s4.ps1
+
+# Local unit & instrumented tests
+app/src/test/
+app/src/androidTest/
+
+# Crash logs & Android Studio Profiler dumps
+*.log
+*.hprof
+hs_err_pid*
+
+# Personal trip exports / recorded location traces
+exports/
+*.csv
+
+# Local Android Studio / IntelliJ caches
+.navigation/
+*.orig
