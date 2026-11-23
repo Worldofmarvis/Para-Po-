@@ -10,8 +10,12 @@ import kotlinx.serialization.Serializable
 data class AuthData(
     val username: String,
     val salt: String,          // base64, 16 bytes
-    val hash: String,          // PBKDF2-HMAC-SHA256
-    val iterations: Int = Constants.PBKDF2_ITERATIONS
+    val hash: String,          // PBKDF2-HMAC-SHA256 of the password
+    val iterations: Int = Constants.PBKDF2_ITERATIONS,
+    val pinSalt: String? = null,   // 4-digit unlock PIN, hashed the same way; null until created
+    val pinHash: String? = null,
+    val pinIterations: Int = Constants.PBKDF2_ITERATIONS,
+    val keepSignedIn: Boolean = false // true: skip username/password on launch, ask only the PIN
 )
 
 @Serializable

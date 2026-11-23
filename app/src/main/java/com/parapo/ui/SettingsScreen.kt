@@ -69,7 +69,7 @@ import kotlin.math.roundToInt
 /**
  * S9 Settings (FR-16, FR-17, Build Guide 6.3 & 6.6).
  * Persists tunable alert distance, safety margin (default 500 m), escalation delays,
- * battery exemption shortcut to S10, optional Emergency SMS, and Change PIN.
+ * battery exemption shortcut to S10, optional Emergency SMS, and Change password.
  */
 @Composable
 fun SettingsScreen(onOpenPermissions: () -> Unit) {
@@ -91,8 +91,9 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
 
     var showSmsDialog by remember { mutableStateOf(false) }
     var smsInput by remember(settings.smsNumber) { mutableStateOf(settings.smsNumber.orEmpty()) }
+    var showChangePassword by remember { mutableStateOf(false) }
     var showChangePin by remember { mutableStateOf(false) }
-    var pinFeedback by remember { mutableStateOf<String?>(null) }
+    var passwordFeedback by remember { mutableStateOf<String?>(null) }
 
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -132,7 +133,7 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (pinFeedback != null) {
+            if (passwordFeedback != null) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = SuccessGreen.copy(alpha = 0.14f),
@@ -143,13 +144,13 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = pinFeedback!!,
+                            text = passwordFeedback!!,
                             color = InkNavy,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { pinFeedback = null }) {
+                        TextButton(onClick = { passwordFeedback = null }) {
                             Text("OK", color = ActionBlue, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -343,6 +344,23 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                 }
             }
 
+            // Change password
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showChangePassword = true }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Change password", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = InkNavy)
+                        Text("Update the password you use to log in on this phone.", fontSize = 13.sp, color = MetaNavy)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MetaNavy)
+                }
+            }
+
             // Change PIN
             SettingsCard {
                 Row(
@@ -354,7 +372,7 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Change PIN", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = InkNavy)
-                        Text("Update your 4-digit local login PIN.", fontSize = 13.sp, color = MetaNavy)
+                        Text("Update the 4-digit PIN that unlocks Para Po!", fontSize = 13.sp, color = MetaNavy)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MetaNavy)
                 }
@@ -411,10 +429,29 @@ fun SettingsScreen(onOpenPermissions: () -> Unit) {
                         AuthGate.changePin(appContext, currentPin, newPin)
                     }
                     if (ok) {
-                        pinFeedback = "PIN updated successfully."
+                        passwordFeedback = "PIN updated successfully."
                         showChangePin = false
                     } else {
                         onError("Current PIN is incorrect.")
+                    }
+                }
+            }
+        )
+    }
+
+    if (showChangePassword) {
+        ChangePasswordDialog(
+            onDismiss = { showChangePassword = false },
+            onSubmit = { currentPassword, newPassword, onError ->
+                scope.launch {
+                    val ok = withContext(Dispatchers.Default) {
+                        AuthGate.changePassword(appContext, currentPassword, newPassword)
+                    }
+                    if (ok) {
+                        passwordFeedback = "Password updated successfully."
+                        showChangePassword = false
+                    } else {
+                        onError("Current password is incorrect.")
                     }
                 }
             }
@@ -460,6 +497,72 @@ private fun ToggleRow(
 }
 
 @Composable
+private fun ChangePasswordDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (currentPassword: String, newPassword: String, onError: (String) -> Unit) -> Unit
+) {
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = currentPassword,
+                    onValueChange = { if (it.length <= AuthGate.PASSWORD_MAX) currentPassword = it },
+                    label = { Text("Current password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { if (it.length <= AuthGate.PASSWORD_MAX) newPassword = it },
+                    label = { Text("New password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { if (it.length <= AuthGate.PASSWORD_MAX) confirmPassword = it },
+                    label = { Text("Confirm new password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                if (error != null) {
+                    Text(error!!, color = AlertOrange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val problem = AuthGate.passwordError(newPassword)
+                        ?: if (newPassword != confirmPassword) "New passwords don't match." else null
+                    if (currentPassword.isEmpty()) {
+                        error = "Enter your current password."
+                    } else if (problem != null) {
+                        error = problem
+                    } else {
+                        error = null
+                        onSubmit(currentPassword, newPassword) { error = it }
+                    }
+                }
+            ) { Text("Update") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
 private fun ChangePinDialog(
     onDismiss: () -> Unit,
     onSubmit: (currentPin: String, newPin: String, onError: (String) -> Unit) -> Unit
@@ -475,7 +578,7 @@ private fun ChangePinDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = currentPin,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) currentPin = it },
+                    onValueChange = { if (it.length <= AuthGate.PIN_LENGTH && it.all(Char::isDigit)) currentPin = it },
                     label = { Text("Current 4-digit PIN") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
@@ -483,7 +586,7 @@ private fun ChangePinDialog(
                 )
                 OutlinedTextField(
                     value = newPin,
-                    onValueChange = { if (it.length <= 4 && it.all(Char::isDigit)) newPin = it },
+                    onValueChange = { if (it.length <= AuthGate.PIN_LENGTH && it.all(Char::isDigit)) newPin = it },
                     label = { Text("New 4-digit PIN") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
@@ -497,8 +600,8 @@ private fun ChangePinDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (currentPin.length != 4 || newPin.length != 4) {
-                        error = "Both PINs must be 4 digits."
+                    if (AuthGate.pinError(currentPin) != null || AuthGate.pinError(newPin) != null) {
+                        error = "Both PINs must be ${AuthGate.PIN_LENGTH} digits."
                     } else {
                         error = null
                         onSubmit(currentPin, newPin) { error = it }

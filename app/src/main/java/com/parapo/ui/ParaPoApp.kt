@@ -119,7 +119,7 @@ fun ParaPoApp() {
                     val destination = when (trip.phase) {
                         TripPhase.TRACKING, TripPhase.ARMED -> Routes.LIVE
                         TripPhase.ALERTING -> Routes.ALERT
-                        else -> Routes.LOGIN
+                        else -> if (AuthGate.hasAccount(appContext)) Routes.LOGIN else Routes.SIGNUP
                     }
                     navController.navigate(destination) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
@@ -127,16 +127,42 @@ fun ParaPoApp() {
                 })
             }
             composable(Routes.LOGIN) {
-                LoginScreen(onSuccess = {
-                    val nextRoute = if (PermissionHelper.hasAllRequiredPermissions(appContext)) {
-                        Routes.HOME
-                    } else {
-                        Routes.PERMISSIONS
+                LoginScreen(
+                    onSuccess = {
+                        val nextRoute = if (PermissionHelper.hasAllRequiredPermissions(appContext)) {
+                            Routes.HOME
+                        } else {
+                            Routes.PERMISSIONS
+                        }
+                        navController.navigate(nextRoute) {
+                            popUpTo(Routes.LOGIN) { inclusive = true }
+                        }
+                    },
+                    onGoToSignup = {
+                        navController.navigate(Routes.SIGNUP) {
+                            popUpTo(Routes.LOGIN) { inclusive = true }
+                        }
                     }
-                    navController.navigate(nextRoute) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
+                )
+            }
+            composable(Routes.SIGNUP) {
+                SignupScreen(
+                    onSuccess = {
+                        val nextRoute = if (PermissionHelper.hasAllRequiredPermissions(appContext)) {
+                            Routes.HOME
+                        } else {
+                            Routes.PERMISSIONS
+                        }
+                        navController.navigate(nextRoute) {
+                            popUpTo(Routes.SIGNUP) { inclusive = true }
+                        }
+                    },
+                    onGoToLogin = {
+                        navController.navigate(Routes.LOGIN) {
+                            popUpTo(Routes.SIGNUP) { inclusive = true }
+                        }
                     }
-                })
+                )
             }
             composable(Routes.HOME) {
                 HomeScreen(

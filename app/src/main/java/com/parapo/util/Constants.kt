@@ -36,7 +36,7 @@ object Constants {
     const val SOUND_AFTER_S = 10
     const val FULLSCREEN_AFTER_S = 20
 
-    // PIN hash
+    // Password hash
     const val PBKDF2_ITERATIONS = 120_000
 
     // Route download target
