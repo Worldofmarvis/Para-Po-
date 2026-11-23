@@ -119,6 +119,7 @@ fun ParaPoApp() {
                     val destination = when (trip.phase) {
                         TripPhase.TRACKING, TripPhase.ARMED -> Routes.LIVE
                         TripPhase.ALERTING -> Routes.ALERT
+                        TripPhase.COMPLETED -> Routes.SUMMARY
                         else -> if (AuthGate.hasAccount(appContext)) Routes.LOGIN else Routes.SIGNUP
                     }
                     navController.navigate(destination) {
