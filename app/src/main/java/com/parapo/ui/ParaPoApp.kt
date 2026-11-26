@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -41,6 +42,8 @@ import com.parapo.ui.theme.ActionBlue
 import com.parapo.ui.theme.InactiveGray
 import com.parapo.ui.theme.InkNavy
 import com.parapo.util.PermissionHelper
+import com.parapo.util.PlaceNamer
+import kotlinx.coroutines.launch
 import com.parapo.util.VehicleMode
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -246,7 +249,11 @@ fun ParaPoApp() {
                 )
             }
             composable(Routes.SUMMARY) {
+                val saveScope = rememberCoroutineScope()
+                var saving by remember { mutableStateOf(false) }
                 SummaryScreen(onSave = {
+                    if (saving) return@SummaryScreen
+                    saving = true
                     val setup = trip.setup
                     val summary = TripSummaryStore.last
                     val triggerM = trip.triggerM.roundToInt().takeIf { it > 0 }
@@ -256,12 +263,6 @@ fun ParaPoApp() {
                     val isOnTime = abs(firedM - triggerM) <= 300
                     val mode = runCatching { VehicleMode.valueOf(setup?.vehicle ?: "BUS") }
                         .getOrDefault(VehicleMode.BUS)
-                    val destLabel = setup?.destName?.takeIf { it.isNotBlank() }
-                        ?: if (setup != null) {
-                            String.format(java.util.Locale.US, "%.4f, %.4f", setup.destLat, setup.destLon)
-                        } else {
-                            "Selected Stop"
-                        }
                     val sourceLabel = when {
                         trip.usedCellFallback -> "GPS+CELL"
                         trip.source == com.parapo.trip.PositionSourceKind.DEAD_RECKONING -> "DEAD_RECKONING"
@@ -270,30 +271,47 @@ fun ParaPoApp() {
                     val bm = appContext.getSystemService(android.os.BatteryManager::class.java)
                     val endPct = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
                         ?.takeIf { it in 0..100 } ?: -1
+                    val tripId = "t_${System.currentTimeMillis()}"
+                    val routeIdValue = trip.routeId.ifBlank { "r_${setup?.destLat?.hashCode() ?: 0}" }
+                    val startedAtValue = TripSummaryStore.startedAtMs.takeIf { it > 0L }
+                        ?: trip.startedAtMs.takeIf { it > 0L }
+                        ?: System.currentTimeMillis()
+                    val gpsLostValue = trip.gpsLostS.toInt()
+                    val newFpValue = trip.newFingerprints
+                    val totalValue = (summary.totalRideM?.takeIf { it > 0.0 } ?: trip.totalM).roundToInt()
+                    val batteryStartValue = TripSummaryStore.batteryStartPct
+                    saveScope.launch {
+                    // Use the typed name if there is one; otherwise look up a real place name.
+                    val destLabel = setup?.destName?.takeIf { it.isNotBlank() }
+                        ?: if (setup != null) {
+                            PlaceNamer.nameFor(appContext, setup.destLat, setup.destLon)
+                                ?: String.format(java.util.Locale.US, "%.4f, %.4f", setup.destLat, setup.destLon)
+                        } else {
+                            "Selected Stop"
+                        }
                     TripLogStore.append(
                         appContext,
                         TripLog(
-                            id = "t_${System.currentTimeMillis()}",
-                            routeId = trip.routeId.ifBlank { "r_${setup?.destLat?.hashCode() ?: 0}" },
-                            startedAt = TripSummaryStore.startedAtMs.takeIf { it > 0L }
-                                ?: trip.startedAtMs.takeIf { it > 0L }
-                                ?: System.currentTimeMillis(),
+                            id = tripId,
+                            routeId = routeIdValue,
+                            startedAt = startedAtValue,
                             endedAt = System.currentTimeMillis(),
                             mode = mode,
                             triggerM = triggerM,
                             alertFiredAtRemainingM = firedM,
                             source = sourceLabel,
-                            gpsLostS = trip.gpsLostS.toInt(),
-                            newFingerprints = trip.newFingerprints,
+                            gpsLostS = gpsLostValue,
+                            newFingerprints = newFpValue,
                             result = if (isOnTime) "ON_TIME" else "LATE",
                             routeLabel = "Current Location → $destLabel",
-                            totalDistanceM = (summary.totalRideM?.takeIf { it > 0.0 } ?: trip.totalM).roundToInt(),
-                            batteryStartPct = TripSummaryStore.batteryStartPct,
+                            totalDistanceM = totalValue,
+                            batteryStartPct = batteryStartValue,
                             batteryEndPct = endPct
                         )
                     )
                     TripController.reset()
                     backToHome()
+                    }
                 })
             }
             composable(Routes.TRIPS) { TripsScreen() }

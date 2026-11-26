@@ -3,6 +3,7 @@ package com.parapo.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.BitmapDrawable
@@ -177,6 +178,21 @@ private fun partialPoints(points: List<GeoPoint>, cum: DoubleArray, frac: Float)
     return points.subList(0, i) + tip
 }
 
+/**
+ * Dashed straight link between two points. Used for the short hops between you / your stop and the
+ * nearest road, because the route service snaps both ends onto the road network.
+ */
+private fun addDashedLink(map: MapView, a: GeoPoint, b: GeoPoint) {
+    if (haversineM(a, b) < 3.0) return
+    map.overlays.add(Polyline().apply {
+        setPoints(listOf(a, b))
+        outlinePaint.color = PrimaryBlue.toArgb()
+        outlinePaint.strokeWidth = 8f
+        outlinePaint.strokeCap = Paint.Cap.BUTT
+        outlinePaint.pathEffect = DashPathEffect(floatArrayOf(22f, 18f), 0f)
+    })
+}
+
 internal fun pinDrawable(ctx: Context, color: Int): Drawable {
     val d = ctx.resources.displayMetrics.density
     val w = (34 * d).toInt()
@@ -330,8 +346,16 @@ fun TripSetupScreen(
 
     val mapRoute = route
     val cum = remember(mapRoute) { mapRoute?.let { cumulative(it.points) } }
-    val displayKm: Double? = mapRoute?.let { it.distanceM / 1000.0 }
-        ?: dest?.let { haversineM(origin, it) * savedSettings.roadFactor / 1000.0 }
+    val destNow = dest
+    // Road distance plus the short hops from you to the road and from the road to the stop,
+    // so a stop that is right next to you never shows a misleading "0.0 km".
+    val displayKm: Double? = if (mapRoute != null && destNow != null && mapRoute.points.isNotEmpty()) {
+        (mapRoute.distanceM +
+            haversineM(origin, mapRoute.points.first()) +
+            haversineM(mapRoute.points.last(), destNow)) / 1000.0
+    } else {
+        destNow?.let { haversineM(origin, it) * savedSettings.roadFactor / 1000.0 }
+    }
 
     val onTap by rememberUpdatedState<(GeoPoint) -> Unit> { tapped ->
         focus.clearFocus()
@@ -388,6 +412,13 @@ fun TripSetupScreen(
                     mapRoute != null && cum != null -> partialPoints(mapRoute.points, cum, frac)
                     routeFailed && mapDest != null -> listOf(origin, mapDest)
                     else -> emptyList()
+                }
+                // Dashed hops: you -> start of the road route, and end of the road route -> your stop
+                if (mapRoute != null && mapRoute.points.isNotEmpty()) {
+                    addDashedLink(map, origin, mapRoute.points.first())
+                    if (frac >= 1f && mapDest != null) {
+                        addDashedLink(map, mapRoute.points.last(), mapDest)
+                    }
                 }
                 if (line.size >= 2) {
                     map.overlays.add(Polyline().apply {
@@ -448,14 +479,23 @@ fun TripSetupScreen(
                     setAlignRight(true)
                 })
 
-                // Fit the camera once per stop, and again when the road route arrives
+                // Fit the camera once per stop, and again when the road route arrives.
+                // The box always includes YOU and the STOP (not just the road line) and is never
+                // smaller than about 450 m, so a nearby stop doesn't zoom into building outlines.
                 val fitKey: Any? = mapRoute ?: mapDest
                 if (map.tag != fitKey) {
                     map.tag = fitKey
                     if (mapDest != null) {
-                        val pts = mapRoute?.points ?: listOf(origin, mapDest)
+                        val pts = (mapRoute?.points ?: emptyList()) + listOf(origin, mapDest)
                         map.post {
-                            val box = BoundingBox.fromGeoPoints(pts)
+                            val raw = BoundingBox.fromGeoPoints(pts)
+                            val minSpan = 0.004 // degrees, roughly 450 m
+                            val halfLat = max(raw.latitudeSpan, minSpan) / 2
+                            val halfLon = max(raw.longitudeSpan, minSpan) / 2
+                            val box = BoundingBox(
+                                raw.centerLatitude + halfLat, raw.centerLongitude + halfLon,
+                                raw.centerLatitude - halfLat, raw.centerLongitude - halfLon
+                            )
                             map.zoomToBoundingBox(box, true, (110 * map.resources.displayMetrics.density).toInt())
                         }
                     }
@@ -501,7 +541,7 @@ fun TripSetupScreen(
                 } else {
                     val locSource = FusedLocationSource(ctx.applicationContext)
                     if (!locSource.isLocationEnabled()) {
-                        gpsStatusMsg = "Location is off — turn on Location in settings"
+                        gpsStatusMsg = "Location is off \u2014 turn on Location in settings"
                     } else {
                         gpsStatusMsg = "Reloading GPS\u2026"
                         scope.launch {
@@ -511,7 +551,7 @@ fun TripSetupScreen(
                                 mapRef?.controller?.animateTo(live)
                                 gpsStatusMsg = null
                             } else {
-                                gpsStatusMsg = "No GPS fix yet — enable Wi-Fi/Location and retry"
+                                gpsStatusMsg = "No GPS fix yet \u2014 enable Wi-Fi/Location and retry"
                             }
                         }
                     }
@@ -583,6 +623,12 @@ fun TripSetupScreen(
                     valueRange = 1f..5f,
                     step = 0.5f
                 )
+                if (displayKm != null && displayKm < alertKm) {
+                    Text(
+                        "Your stop is only ${"%.1f".format(displayKm)} km away, closer than the alert distance, so the alert will ring right away.",
+                        fontSize = 12.sp, color = AlertAmber, modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
 
                 Button(
                     onClick = {

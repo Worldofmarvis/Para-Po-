@@ -36,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -58,6 +59,7 @@ import com.parapo.trip.TripPhase
 import com.parapo.ui.theme.ActionBlue
 import com.parapo.ui.theme.AlertOrange
 import com.parapo.storage.ProfileStore
+import com.parapo.util.PlaceNamer
 import com.parapo.ui.components.ProfileAvatar
 import androidx.compose.runtime.collectAsState
 import com.parapo.ui.theme.AvatarBg
@@ -98,9 +100,7 @@ fun HomeScreen(
     var gpsLoading by remember { mutableStateOf(false) }
     var gpsLabel by remember {
         mutableStateOf(
-            FusedLocationSource.lastFetched?.let {
-                String.format(Locale.US, "Your location (%.4f, %.4f)", it.latitude, it.longitude)
-            } ?: "Your location (GPS)"
+            if (FusedLocationSource.lastFetched != null) "Finding your location\u2026" else "Your location (GPS)"
         )
     }
 
@@ -134,9 +134,16 @@ fun HomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (FusedLocationSource.lastFetched == null && PermissionHelper.hasFineLocation(ctx)) {
-            reloadLocation()
+        if (!PermissionHelper.hasFineLocation(ctx)) return@LaunchedEffect
+        // Show the last known spot as a place name right away...
+        FusedLocationSource.lastFetched?.let { last ->
+            val place = runCatching { RouteRepository(ctx.applicationContext).reverseGeocode(last) }.getOrNull()
+            if (!place.isNullOrBlank()) {
+                gpsLabel = place.substringBefore(", Philippines").ifBlank { place }
+            }
         }
+        // ...then refresh from GPS so it shows where you are now.
+        reloadLocation()
     }
     Column(
         modifier = Modifier
@@ -296,10 +303,15 @@ fun HomeScreen(
                     val distKm = String.format(Locale.US, "%.1f", log.totalDistanceM / 1000.0).toDouble()
                     val dateText = SimpleDateFormat("MMM d", Locale.US).format(Date(log.startedAt))
                     val parts = log.routeLabel.split("→").map { it.trim() }
+                    // Older trips were saved with raw coordinates; look up a place name for them.
+                    val rawTo = parts.getOrNull(1)?.ifBlank { log.routeId } ?: log.routeLabel.ifBlank { log.routeId }
+                    val toName by produceState(initialValue = rawTo, key1 = rawTo) {
+                        value = PlaceNamer.resolveLabel(ctx, rawTo)
+                    }
                     TripRow(
                         trip = RecentTrip(
                             from = parts.getOrNull(0)?.ifBlank { "Origin" } ?: "Origin",
-                            to = parts.getOrNull(1)?.ifBlank { log.routeId } ?: log.routeLabel.ifBlank { log.routeId },
+                            to = toName,
                             distanceKm = distKm,
                             dateText = dateText,
                             result = if (log.result == "ON_TIME") AlertResult.ON_TIME else AlertResult.LATE
