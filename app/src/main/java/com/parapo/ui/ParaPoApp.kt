@@ -31,6 +31,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.parapo.auth.AuthGate
+import com.parapo.storage.ProfileStore
 import com.parapo.storage.SettingsStore
 import com.parapo.storage.TripLog
 import com.parapo.storage.TripLogStore
@@ -62,11 +63,13 @@ fun ParaPoApp() {
     val appContext = LocalContext.current.applicationContext
     val trip by TripController.state.collectAsState()
     val savedTrips by TripLogStore.trips.collectAsState()
+    var username by remember { mutableStateOf(AuthGate.getUsername(appContext)) }
 
     // Load persisted settings and trip history once at app launch.
     LaunchedEffect(Unit) {
         SettingsStore.load(appContext)
         TripLogStore.load(appContext)
+        ProfileStore.load(appContext)
     }
 
     // When the controller decides it is time to alert, open S6 (once).
@@ -170,12 +173,13 @@ fun ParaPoApp() {
             }
             composable(Routes.HOME) {
                 HomeScreen(
-                    userName = AuthGate.getUsername(appContext),
+                    userName = username,
                     recentTrips = savedTrips,
                     activeTripPhase = trip.phase,
                     onOpenLiveTrip = { navController.navigate(Routes.LIVE) },
                     onSetStop = { navController.navigate(Routes.TRIP_SETUP) },
                     onTestAlert = { navController.navigate(Routes.ALERT) },
+                    onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     onOpenTrips = {
                         navController.navigate(Routes.TRIPS) {
                             popUpTo(Routes.HOME) { saveState = true }
@@ -295,6 +299,12 @@ fun ParaPoApp() {
             composable(Routes.TRIPS) { TripsScreen() }
             composable(Routes.SETTINGS) {
                 SettingsScreen(onOpenPermissions = { navController.navigate(Routes.PERMISSIONS) })
+            }
+            composable(Routes.PROFILE) {
+                ProfileScreen(
+                    onBack = { navController.popBackStack() },
+                    onUsernameChanged = { username = it }
+                )
             }
             composable(Routes.PERMISSIONS) {
                 PermissionsScreen(onContinue = backToHome)

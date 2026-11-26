@@ -13,6 +13,7 @@ object Routes {
     const val TRIPS = "trips"             // S8
     const val SETTINGS = "settings"       // S9
     const val PERMISSIONS = "permissions" // S10
+    const val PROFILE = "profile"         // profile and photo (opened from the Home avatar)
 
     /** Bottom bar is shown only on these (hidden on S1, S2, S2b, S4, S6, S7, S10). */
     val bottomBarRoutes = setOf(HOME, LIVE, TRIPS, SETTINGS)

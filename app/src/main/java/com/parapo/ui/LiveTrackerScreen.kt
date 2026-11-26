@@ -62,7 +62,10 @@ import com.parapo.ui.components.SuloPose
 import com.parapo.ui.theme.AlertOrange
 import com.parapo.ui.theme.DangerRed
 import com.parapo.ui.theme.DeepBlue
+import com.parapo.ui.theme.InkNavy
+import com.parapo.ui.theme.MetaNavy
 import com.parapo.ui.theme.PrimaryBlue
+import com.parapo.ui.theme.ScreenBg
 import com.parapo.ui.theme.SuccessGreen
 import com.parapo.ui.theme.SurfaceLight
 import org.osmdroid.config.Configuration
@@ -94,22 +97,35 @@ fun LiveTrackerScreen(onSetStop: () -> Unit, onCancelled: () -> Unit) {
 
 @Composable
 private fun NoTrip(onSetStop: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().statusBarsPadding().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Sulo(SuloPose.CALM, size = 140.dp)
-        Spacer(Modifier.height(16.dp))
-        Text("No trip in progress", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = DeepBlue)
-        Text(
-            "Set your stop and Sulo will watch the road for you.",
-            fontSize = 16.sp, color = MutedText, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp)
-        )
-        Spacer(Modifier.height(20.dp))
-        Button(onClick = onSetStop, shape = RoundedCornerShape(50), modifier = Modifier.height(52.dp)) {
-            Text("Set My Stop", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    // Same look as My Trips: white header bar on the light ScreenBg.
+    Column(Modifier.fillMaxSize().background(ScreenBg)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Live", color = InkNavy, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+        }
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Sulo(SuloPose.CALM, size = 150.dp)
+            Spacer(Modifier.height(16.dp))
+            Text("No trip in progress", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = InkNavy)
+            Text(
+                "Set your stop and Sulo will watch the road for you.",
+                fontSize = 15.sp, color = MetaNavy, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onSetStop, shape = RoundedCornerShape(50), modifier = Modifier.height(52.dp)) {
+                Text("Set My Stop", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

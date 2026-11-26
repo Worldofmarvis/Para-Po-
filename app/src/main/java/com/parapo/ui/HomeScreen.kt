@@ -57,6 +57,9 @@ import com.parapo.storage.TripLog
 import com.parapo.trip.TripPhase
 import com.parapo.ui.theme.ActionBlue
 import com.parapo.ui.theme.AlertOrange
+import com.parapo.storage.ProfileStore
+import com.parapo.ui.components.ProfileAvatar
+import androidx.compose.runtime.collectAsState
 import com.parapo.ui.theme.AvatarBg
 import com.parapo.ui.theme.AvatarIcon
 import com.parapo.ui.theme.DangerRed
@@ -85,7 +88,8 @@ fun HomeScreen(
     onOpenLiveTrip: () -> Unit = {},
     onSetStop: () -> Unit,
     onTestAlert: () -> Unit,
-    onOpenTrips: () -> Unit = {}
+    onOpenTrips: () -> Unit = {},
+    onOpenProfile: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -148,20 +152,12 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(AvatarBg),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Person,
-                    contentDescription = null,
-                    tint = AvatarIcon,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
+            val profilePhoto by ProfileStore.photo.collectAsState()
+            ProfileAvatar(
+                photo = profilePhoto,
+                size = 56.dp,
+                modifier = Modifier.clickable(onClick = onOpenProfile)
+            )
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

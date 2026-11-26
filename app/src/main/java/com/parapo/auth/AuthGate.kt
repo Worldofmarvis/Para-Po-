@@ -2,6 +2,7 @@ package com.parapo.auth
 
 import android.content.Context
 import com.parapo.storage.AuthData
+import com.parapo.storage.ProfileStore
 import com.parapo.storage.SettingsStore
 import com.parapo.storage.TripLogStore
 import com.parapo.util.Constants
@@ -90,6 +91,14 @@ object AuthGate {
         return userOk && passwordOk
     }
 
+    /** Renames the account. Returns false if there is no account or the new name is not acceptable. */
+    fun changeUsername(context: Context, newUsername: String): Boolean {
+        val data = loadAuth(context) ?: return false
+        if (usernameError(newUsername) != null) return false
+        save(context, data.copy(username = newUsername.trim()))
+        return true
+    }
+
     fun changePassword(context: Context, currentPassword: String, newPassword: String): Boolean {
         val data = loadAuth(context) ?: return false
         if (!verifyHash(currentPassword, data)) return false
@@ -131,6 +140,7 @@ object AuthGate {
         authFile(context).delete()
         SettingsStore.reset(context)
         TripLogStore.clear(context)
+        ProfileStore.clear(context)
         File(context.filesDir, "routes").deleteRecursively()
         File(context.filesDir, "fingerprints").deleteRecursively()
     }
